@@ -2,6 +2,8 @@
 #include <iostream>
 #include <map>
 
+#include "source_manager.h"
+
 void Usage() {
     std::cout
         << "usage: fidlc [--json JSON_PATH]\n"
