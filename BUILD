@@ -1,5 +1,5 @@
 cc_binary(
     name = "main",
-    srcs = ["main.cpp"],
+    srcs = ["compiler/main.cpp"],
     deps = []
 )
