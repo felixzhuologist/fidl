@@ -1,3 +1,6 @@
+main
+*.o
+
 bazel-bin
 bazel-fidl
 bazel-genfiles
