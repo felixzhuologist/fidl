@@ -1,13 +1,7 @@
 cc_binary(
     name = "main",
     srcs = ["main.cpp"],
-    deps = [":source_manager"]
-)
-
-cc_library(
-    name = "source_file",
-    srcs = ["source_file.cpp"],
-    hdrs = ["string_view.h", "source_file.h"],
+    deps = [":source_manager", ":source_file"]
 )
 
 cc_library(
@@ -15,4 +9,10 @@ cc_library(
     srcs = ["source_manager.cpp"],
     hdrs = ["string_view.h", "source_manager.h"],
     deps = [":source_file"]
+)
+
+cc_library(
+    name = "source_file",
+    srcs = ["source_file.cpp"],
+    hdrs = ["string_view.h", "source_file.h"],
 )

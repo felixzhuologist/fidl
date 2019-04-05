@@ -1,8 +1,11 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <vector>
 
 #include "source_manager.h"
+
+namespace {
 
 void Usage() {
     std::cout
@@ -103,6 +106,13 @@ private:
     const char** arguments_;
 };
 
+} // namespace
+
+int compile(std::string library_name,
+            std::map<Behavior, std::fstream> outputs,
+            std::vector<fidl::SourceManager> source_managers) {
+  return 0;
+}
 
 int main(int argc, char* argv[]) {
     auto argv_args = std::make_unique<ArgvArguments>(argc, argv);
@@ -136,6 +146,20 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    return 0;
+    std::vector<fidl::SourceManager> source_managers;
+    source_managers.push_back(fidl::SourceManager());
+    while (argv_args->Remaining()) {
+      std::string arg = argv_args->Claim();
+      if (arg == "--files") {
+        source_managers.emplace_back();
+      } else {
+        if (!source_managers.back().CreateSource(arg.data())) {
+          Fail("Couldn't read in source data from %s\n", arg.data());
+        }
+      }
+    }
+
+    auto status = compile(library_name, std::move(outputs), std::move(source_managers));
+    return status;
 }
 

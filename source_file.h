@@ -12,7 +12,7 @@ namespace fidl {
 class SourceFile {
 public:
     SourceFile(std::string filename, std::string data);
-    virtual ~SourceFile();
+    // virtual ~SourceFile();
 
     StringView filename() const { return filename_; }
     StringView data() const { return data_; }
