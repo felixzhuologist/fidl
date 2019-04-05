@@ -1,29 +1,14 @@
+#include <fstream>
 #include <iostream>
+#include <map>
 
 void Usage() {
     std::cout
-        << "usage: fidlc [--c-header HEADER_PATH]\n"
-           "             [--c-client CLIENT_PATH]\n"
-           "             [--c-server SERVER_PATH]\n"
-           "             [--tables TABLES_PATH]\n"
-           "             [--json JSON_PATH]\n"
+        << "usage: fidlc [--json JSON_PATH]\n"
            "             [--name LIBRARY_NAME]\n"
            "             [--werror]\n"
            "             [--files [FIDL_FILE...]...]\n"
            "             [--help]\n"
-           "\n"
-           " * `--c-header HEADER_PATH`. If present, this flag instructs `fidlc` to output\n"
-           "   a C header at the given path.\n"
-           "\n"
-           " * `--c-client CLIENT_PATH`. If present, this flag instructs `fidlc` to output\n"
-           "   the simple C client implementation at the given path.\n"
-           "\n"
-           " * `--c-server SERVER_PATH`. If present, this flag instructs `fidlc` to output\n"
-           "   the simple C server implementation at the given path.\n"
-           "\n"
-           " * `--tables TABLES_PATH`. If present, this flag instructs `fidlc` to output\n"
-           "   coding tables at the given path. The coding tables are required to encode and\n"
-           "   decode messages from the C and C++ bindings.\n"
            "\n"
            " * `--json JSON_PATH`. If present, this flag instructs `fidlc` to output the\n"
            "   library's intermediate representation at the given path. The intermediate\n"
@@ -41,9 +26,6 @@ void Usage() {
            "   libraries able to use declarations from preceding libraries but not vice versa.\n"
            "   Output is only generated for the final library, not for each of its dependencies.\n"
            "\n"
-           " * `--json-schema`. If present, this flag instructs `fidlc` to output the\n"
-           "   JSON schema of the intermediate representation.\n"
-           "\n"
            " * `--werror`. Treats warnings as errors.\n"
            "\n"
            " * `--help`. Prints this help, and exit immediately.\n"
@@ -58,6 +40,10 @@ void Usage() {
     std::cout.flush();
 }
 
+enum class Behavior {
+    kJSON,
+};
+
 [[noreturn]] void FailWithUsage(const char* message, ...) {
     va_list args;
     va_start(args, message);
@@ -67,13 +53,30 @@ void Usage() {
     exit(1);
 }
 
+[[noreturn]] void Fail(const char* message, ...) {
+    va_list args;
+    va_start(args, message);
+    vfprintf(stderr, message, args);
+    va_end(args);
+    exit(1);
+}
+
+std::fstream Open(std::string filename, std::ios::openmode mode) {
+    // TODO: create parent dirs if they don't exist
+    std::fstream stream;
+    stream.open(filename, mode);
+    if (!stream.is_open()) {
+        Fail("Could not open file: %s\n", filename.data());
+    }
+    return stream;
+}
+
 class Arguments {
 public:
     virtual ~Arguments() {}
     virtual std::string Claim() = 0;
     virtual bool Remaining() const = 0;
 };
-
 
 class ArgvArguments : public Arguments {
 public:
@@ -108,6 +111,27 @@ int main(int argc, char* argv[]) {
     if (!argv_args->Remaining()) {
         Usage();
         exit(0);
+    }
+
+    std::string library_name;
+    bool warnings_as_errors = false;
+    std::map<Behavior, std::fstream> outputs;
+    while (argv_args->Remaining()) {
+        std::string flag = argv_args->Claim();
+        if (flag == "--help") {
+            Usage();
+            exit(0);
+        } else if (flag == "--werror") {
+            warnings_as_errors = true;
+        } else if (flag == "--json") {
+            outputs.emplace(Behavior::kJSON, Open(argv_args->Claim(), std::ios::out));
+        } else if (flag == "--name") {
+            library_name = argv_args->Claim();
+        } else if (flag == "--files") {
+            break;
+        } else {
+            FailWithUsage("Unknown argument: %s\n", flag.data());
+        }
     }
 
     return 0;
