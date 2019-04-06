@@ -1,5 +1,6 @@
 main
 *.o
+test.fidl
 
 bazel-bin
 bazel-fidl

@@ -5,6 +5,13 @@ cc_binary(
 )
 
 cc_library(
+    name = "lexer",
+    srcs = ["lexer.cpp"],
+    hdrs = ["string_view.h", "lexer.h", "token.h", "token_definitions.inc"],
+    deps = [":source_location"],
+)
+
+cc_library(
     name = "source_location",
     srcs = ["source_location.cpp"],
     hdrs = ["string_view.h", "source_location.h"],
