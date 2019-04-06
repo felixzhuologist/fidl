@@ -17,6 +17,15 @@ public:
     StringView filename() const { return filename_; }
     StringView data() const { return data_; }
 
+    struct Position {
+        int line;
+        int column;
+    };
+
+    // return the entire line containing the given stringview, and write out
+    // its position into position_out. fails if view is not a part of this source file
+    StringView LineContaining(StringView view, Position* position_out) const;
+
 private:
     std::string filename_;
     std::string data_;
