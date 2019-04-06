@@ -5,6 +5,13 @@ cc_binary(
 )
 
 cc_library(
+    name = "source_location",
+    srcs = ["source_location.cpp"],
+    hdrs = ["string_view.h", "source_location.h"],
+    deps = [":source_manager"],
+)
+
+cc_library(
     name = "source_manager",
     srcs = ["source_manager.cpp"],
     hdrs = ["string_view.h", "source_manager.h"],
@@ -26,6 +33,7 @@ cc_test(
         "@gtest//:gtest_main",
     ]
 )
+
 cc_library(
     name = "flat_ast",
     srcs = ["flat_ast.cpp"],
