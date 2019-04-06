@@ -3,6 +3,7 @@
 #include <map>
 #include <vector>
 
+#include "flat_ast.h"
 #include "source_manager.h"
 
 namespace {
@@ -106,11 +107,39 @@ private:
     const char** arguments_;
 };
 
+bool Parse(const fidl::SourceFile& source_file, fidl::flat::Library* library) {
+  // fidl::Lexer lexer(source_file);
+  // fidl::Parser parser(&lexer);
+  // auto ast = parser.Parse();
+  // if (!parser.Ok()) {
+  //   return false;
+  // }
+  // if (!library->ConsumeFile(std::move(ast))) {
+  //   return false;
+  // }
+  return true;
+}
+
 } // namespace
 
 int compile(std::string library_name,
             std::map<Behavior, std::fstream> outputs,
             std::vector<fidl::SourceManager> source_managers) {
+  fidl::flat::Libraries all_libraries;
+  fidl::flat::Library* final_library = nullptr;
+  for (const auto& source_manager : source_managers) {
+    if (source_manager.sources().empty()) {
+      continue;
+    }
+
+    auto library = std::make_unique<fidl::flat::Library>(&all_libraries);
+    for (const auto& source_file : source_manager.sources()) {
+      if (!Parse(*source_file, library.get())) {
+        return 1;
+      }
+    }
+  }
+
   return 0;
 }
 
