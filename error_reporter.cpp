@@ -74,4 +74,13 @@ void ErrorReporter::ReportError(const Token& token, StringView message) {
     errors_.push_back(std::move(error));
 }
 
+void ErrorReporter::PrintReports() {
+    for (const auto& error : errors_) {
+        fprintf(stderr, "%s\n", error.data());
+    }
+    for (const auto& warning : warnings_) {
+        fprintf(stderr, "%s\n", warning.data());
+    }
+}
+
 } // namespace fidl

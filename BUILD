@@ -4,6 +4,17 @@ cc_binary(
     deps = [":lexer", ":parser", ":flat_ast"]
 )
 
+cc_test(
+    name = "unit",
+    srcs = ["unit_tests.cpp"],
+    deps = [
+        ":lexer",
+        ":parser",
+        "@gtest//:gtest",
+        "@gtest//:gtest_main",
+    ]
+)
+
 cc_library(
     name = "parser",
     srcs = ["parser.cpp"],
@@ -50,16 +61,6 @@ cc_library(
     name = "source_file",
     srcs = ["source_file.cpp"],
     hdrs = ["string_view.h", "source_file.h"],
-)
-
-cc_test(
-    name = "source_file_test",
-    srcs = ["source_file_test.cpp"],
-    deps = [
-        ":source_file",
-        "@gtest//:gtest",
-        "@gtest//:gtest_main",
-    ]
 )
 
 cc_library(

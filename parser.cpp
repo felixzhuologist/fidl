@@ -1,3 +1,4 @@
+#include <iostream>
 #include "parser.h"
 
 namespace fidl {

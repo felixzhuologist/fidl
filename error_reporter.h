@@ -20,6 +20,7 @@ public:
     const std::vector<std::string>& errors() const { return errors_; }
     const std::vector<std::string>& warnings() const { return warnings_; }
 
+    void PrintReports();
 private:
     bool warnings_as_errors_;
     std::vector<std::string> errors_;

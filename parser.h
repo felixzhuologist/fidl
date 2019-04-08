@@ -113,7 +113,7 @@ private:
     static auto OfKind(Token::Kind expected_kind) {
         return [expected_kind](Token::KindAndSubkind actual) -> std::unique_ptr<std::string> {
             if (actual.kind() != expected_kind) {
-                auto message = std::make_unique<std::string>("unexpected token");
+                auto message = std::make_unique<std::string>("unexpected token ");
                 message->append(Token::Name(actual));
                 message->append(", was expecting ");
                 message->append(Token::Name(Token::KindAndSubkind(expected_kind, Token::Subkind::kNone)));

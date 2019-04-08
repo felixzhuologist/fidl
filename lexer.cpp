@@ -17,7 +17,7 @@ bool IsIdentifierValid(StringView source_data) {
 }
 
 bool IsNumericLiteralBody(char c) {
-    if (isalpha(c)) {
+    if (isdigit(c)) {
         return true;
     }
 
