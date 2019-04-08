@@ -1,13 +1,20 @@
 cc_binary(
     name = "main",
     srcs = ["main.cpp"],
-    deps = [":source_manager", ":source_file", ":flat_ast"]
+    deps = [":lexer", ":flat_ast"]
 )
 
 cc_library(
     name = "lexer",
     srcs = ["lexer.cpp"],
     hdrs = ["string_view.h", "lexer.h", "token.h", "token_definitions.inc"],
+    deps = [":source_location"],
+)
+
+cc_library(
+    name = "raw_ast",
+    srcs = ["raw_ast.cpp"],
+    hdrs = ["raw_ast.h", "token.h", "token_definitions.inc", "tree_visitor.h", "types.h"],
     deps = [":source_location"],
 )
 
@@ -39,10 +46,4 @@ cc_test(
         "@gtest//:gtest",
         "@gtest//:gtest_main",
     ]
-)
-
-cc_library(
-    name = "flat_ast",
-    srcs = ["flat_ast.cpp"],
-    hdrs = ["string_view.h", "flat_ast.h"]
 )

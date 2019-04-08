@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "flat_ast.h"
+#include "lexer.h"
 #include "source_manager.h"
 
 namespace {
@@ -108,7 +109,7 @@ private:
 };
 
 bool Parse(const fidl::SourceFile& source_file, fidl::flat::Library* library) {
-  // fidl::Lexer lexer(source_file);
+  fidl::Lexer lexer(source_file);
   // fidl::Parser parser(&lexer);
   // auto ast = parser.Parse();
   // if (!parser.Ok()) {
