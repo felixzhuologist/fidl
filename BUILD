@@ -1,7 +1,14 @@
 cc_binary(
     name = "main",
     srcs = ["main.cpp"],
-    deps = [":lexer", ":flat_ast"]
+    deps = [":lexer", ":parser", ":flat_ast"]
+)
+
+cc_library(
+    name = "parser",
+    srcs = ["parser.cpp"],
+    hdrs = ["parser.h"],
+    deps = [":lexer", ":raw_ast"],
 )
 
 cc_library(

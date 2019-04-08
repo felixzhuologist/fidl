@@ -155,13 +155,11 @@ public:
     TypeConstructor(SourceElement const& element,
         std::unique_ptr<CompoundIdentifier> identifier,
         std::unique_ptr<TypeConstructor> maybe_arg_type_ctor,
-        std::unique_ptr<types::HandleSubtype> maybe_handle_subtype,
         std::unique_ptr<Constant> maybe_size,
         types::Nullability nullability)
         : SourceElement(element.start_, element.end_),
           identifier(std::move(identifier)),
           maybe_arg_type_ctor(std::move(maybe_arg_type_ctor)),
-          maybe_handle_subtype(std::move(maybe_handle_subtype)),
           maybe_size(std::move(maybe_size)),
           nullability(nullability) {}
 
@@ -169,7 +167,6 @@ public:
 
     std::unique_ptr<CompoundIdentifier> identifier;
     std::unique_ptr<TypeConstructor> maybe_arg_type_ctor;
-    std::unique_ptr<types::HandleSubtype> maybe_handle_subtype;
     std::unique_ptr<Constant> maybe_size;
     types::Nullability nullability;
 };

@@ -51,8 +51,6 @@ void TypeConstructor::Accept(TreeVisitor& visitor) {
     visitor.OnCompoundIdentifier(identifier);
     if (maybe_arg_type_ctor != nullptr)
         visitor.OnTypeConstructor(maybe_arg_type_ctor);
-    if (maybe_handle_subtype != nullptr)
-        visitor.OnHandleSubtype(*maybe_handle_subtype);
     if (maybe_size != nullptr)
         visitor.OnConstant(maybe_size);
     visitor.OnNullability(nullability);
