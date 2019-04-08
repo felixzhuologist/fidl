@@ -58,7 +58,7 @@ void Lexer::Skip() {
 
 char Lexer::Consume() {
     auto current = Peek();
-    ++current;
+    ++current_;
     ++token_size_;
     return current;
 }

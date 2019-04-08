@@ -113,11 +113,8 @@ bool Parse(const fidl::SourceFile& source_file,
            fidl::ErrorReporter* error_reporter,
            fidl::flat::Library* library) {
   fidl::Lexer lexer(source_file, error_reporter);
-  std::cout << "lex ok" << std::endl;
   fidl::Parser parser(&lexer, error_reporter);
-  std::cout << "parse construct ok" << std::endl;
   auto ast = parser.Parse();
-  std::cout << "parse done" << std::endl;
   if (!parser.Ok()) {
     return false;
   }
