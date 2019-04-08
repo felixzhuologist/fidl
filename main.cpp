@@ -108,8 +108,10 @@ private:
     const char** arguments_;
 };
 
-bool Parse(const fidl::SourceFile& source_file, fidl::flat::Library* library) {
-  fidl::Lexer lexer(source_file);
+bool Parse(const fidl::SourceFile& source_file,
+           fidl::ErrorReporter* error_reporter,
+           fidl::flat::Library* library) {
+  fidl::Lexer lexer(source_file, error_reporter);
   // fidl::Parser parser(&lexer);
   // auto ast = parser.Parse();
   // if (!parser.Ok()) {
@@ -123,7 +125,8 @@ bool Parse(const fidl::SourceFile& source_file, fidl::flat::Library* library) {
 
 } // namespace
 
-int compile(std::string library_name,
+int compile(fidl::ErrorReporter* error_reporter,
+            std::string library_name,
             std::map<Behavior, std::fstream> outputs,
             std::vector<fidl::SourceManager> source_managers) {
   fidl::flat::Libraries all_libraries;
@@ -135,7 +138,7 @@ int compile(std::string library_name,
 
     auto library = std::make_unique<fidl::flat::Library>(&all_libraries);
     for (const auto& source_file : source_manager.sources()) {
-      if (!Parse(*source_file, library.get())) {
+      if (!Parse(*source_file, error_reporter, library.get())) {
         return 1;
       }
     }
@@ -189,7 +192,8 @@ int main(int argc, char* argv[]) {
       }
     }
 
-    auto status = compile(library_name, std::move(outputs), std::move(source_managers));
+    fidl::ErrorReporter error_reporter(warnings_as_errors);
+    auto status = compile(&error_reporter, library_name, std::move(outputs), std::move(source_managers));
     return status;
 }
 

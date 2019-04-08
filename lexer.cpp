@@ -97,13 +97,13 @@ Token Lexer::LexIdentifier() {
     StringView previous(previous_end_, token_start_ - previous_end_);
     SourceLocation previous_end(previous, source_file_);
     StringView identifier_data = Reset(Token::Kind::kIdentifier);
-    // if (!IsIdentifierValid(identifier_data)) {
-    //     SourceLocation location(StringView(token_start_, token_size_), source_file_);
-    //     std::string msg("invalid identifier '");
-    //     msg.append(identifier_data);
-    //     msg.append("'");
-    //     error_reporter_->ReportError(location, msg);
-    // }
+    if (!IsIdentifierValid(identifier_data)) {
+        SourceLocation location(StringView(token_start_, token_size_), source_file_);
+        std::string msg("invalid identifier '");
+        msg.append(identifier_data);
+        msg.append("'");
+        error_reporter_->ReportError(location, msg);
+    }
     auto subkind = Token::Subkind::kNone;
     auto lookup = keyword_table_.find(identifier_data);
     if (lookup != keyword_table_.end())
@@ -284,11 +284,11 @@ Token Lexer::Lex() {
             case '/':
                 return LexCommentOrDocComment();
             default: {
-                // SourceLocation location(StringView(token_start_, token_size_), source_file_);
-                // std::string msg("invalid character '");
-                // msg.append(location.data());
-                // msg.append("'");
-                // error_reporter_->ReportError(location, msg);
+                SourceLocation location(StringView(token_start_, token_size_), source_file_);
+                std::string msg("invalid character '");
+                msg.append(location.data());
+                msg.append("'");
+                error_reporter_->ReportError(location, msg);
                 continue;
             }
             } // switch
@@ -326,11 +326,11 @@ Token Lexer::Lex() {
             return Finish(Token::Kind::kAmpersand);
 
         default: {
-            // SourceLocation location(StringView(token_start_, token_size_), source_file_);
-            // std::string msg("invalid character '");
-            // msg.append(location.data());
-            // msg.append("'");
-            // error_reporter_->ReportError(location, msg);
+            SourceLocation location(StringView(token_start_, token_size_), source_file_);
+            std::string msg("invalid character '");
+            msg.append(location.data());
+            msg.append("'");
+            error_reporter_->ReportError(location, msg);
             continue;
         }
         } // switch

@@ -4,6 +4,7 @@
 #include <map>
 #include <stdint.h>
 
+#include "error_reporter.h"
 #include "source_location.h"
 #include "string_view.h"
 #include "token.h"
@@ -13,8 +14,8 @@ namespace fidl {
 // call .Lex() to get a single Token out of the backing StringView
 class Lexer {
 public:
-    Lexer(const SourceFile& source_file)
-        : source_file_(source_file) {
+    Lexer(const SourceFile& source_file, ErrorReporter* error_reporter)
+        : source_file_(source_file), error_reporter_(error_reporter) {
         keyword_table_ = {
 #define KEYWORD(Name, Spelling) {Spelling, Token::Subkind::k##Name},
 #include "token_definitions.inc"
@@ -57,6 +58,7 @@ private:
     const SourceFile& source_file_;
     // e.g. "array" -> Token::Subkind::kArray
     std::map<StringView, Token::Subkind> keyword_table_;
+    ErrorReporter* error_reporter_;
 
     const char* current_ = nullptr;
     const char* end_of_file_ = nullptr;
