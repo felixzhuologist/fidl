@@ -127,6 +127,7 @@ bool Parse(const fidl::SourceFile& source_file,
 } // namespace
 
 int compile(fidl::ErrorReporter* error_reporter,
+            fidl::flat::Typespace* typespace,
             std::string library_name,
             std::map<Behavior, std::fstream> outputs,
             std::vector<fidl::SourceManager> source_managers) {
@@ -137,7 +138,7 @@ int compile(fidl::ErrorReporter* error_reporter,
       continue;
     }
 
-    auto library = std::make_unique<fidl::flat::Library>(&all_libraries);
+    auto library = std::make_unique<fidl::flat::Library>(&all_libraries, error_reporter, typespace);
     for (const auto& source_file : source_manager.sources()) {
       if (!Parse(*source_file, error_reporter, library.get())) {
         return 1;
@@ -194,7 +195,13 @@ int main(int argc, char* argv[]) {
     }
 
     fidl::ErrorReporter error_reporter(warnings_as_errors);
-    auto status = compile(&error_reporter, library_name, std::move(outputs), std::move(source_managers));
+    auto typespace = fidl::flat::Typespace::RootTypes(&error_reporter);
+    auto status = compile(&error_reporter,
+                          &typespace,
+                          library_name,
+                          std::move(outputs),
+                          std::move(source_managers));
+    error_reporter.PrintReports();
     return status;
 }
 

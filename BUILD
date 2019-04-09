@@ -16,6 +16,13 @@ cc_test(
 )
 
 cc_library(
+    name = "flat_ast",
+    srcs = ["flat_ast.cpp"],
+    hdrs = ["flat_ast.h", "typeshape.h"],
+    deps = [":raw_ast", ":error_reporter"],
+)
+
+cc_library(
     name = "parser",
     srcs = ["parser.cpp"],
     hdrs = ["parser.h"],
@@ -61,10 +68,4 @@ cc_library(
     name = "source_file",
     srcs = ["source_file.cpp"],
     hdrs = ["string_view.h", "source_file.h"],
-)
-
-cc_library(
-    name = "flat_ast",
-    srcs = ["flat_ast.cpp"],
-    hdrs = ["string_view.h", "flat_ast.h"]
 )
