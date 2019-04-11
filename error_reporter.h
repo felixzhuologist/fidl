@@ -17,6 +17,7 @@ public:
 
     void ReportError(const SourceLocation& location, StringView message);
     void ReportError(const Token& token, StringView message);
+    void ReportError(StringView message);
     const std::vector<std::string>& errors() const { return errors_; }
     const std::vector<std::string>& warnings() const { return warnings_; }
 

@@ -118,9 +118,9 @@ bool Parse(const fidl::SourceFile& source_file,
   if (!parser.Ok()) {
     return false;
   }
-  // if (!library->ConsumeFile(std::move(ast))) {
-  //   return false;
-  // }
+  if (!library->ConsumeFile(std::move(ast))) {
+    return false;
+  }
   return true;
 }
 

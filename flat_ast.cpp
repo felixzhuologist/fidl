@@ -40,6 +40,10 @@ std::string NameName(const flat::Name& name, StringView library_separator, Strin
     return compiled_name;
 }
 
+std::string NameLibrary(const std::vector<StringView>& library_name) {
+    return StringJoin(library_name, ".");
+}
+
 uint32_t AlignTo(uint64_t size, uint64_t alignment) {
     return static_cast<uint32_t>(
         std::min((size + alignment - 1) & -alignment,
@@ -313,6 +317,25 @@ private:
     Size max_size = Size::Max();
 };
 
+class TypeDeclTypeTemplate : public TypeTemplate {
+public:
+    TypeDeclTypeTemplate(Name name, Typespace* typespace, ErrorReporter* error_reporter,
+                         Library* library, TypeDecl* type_decl)
+        : TypeTemplate(std::move(name), typespace, error_reporter),
+          library_(library), type_decl_(type_decl) {}
+
+    bool Create(const SourceLocation& location,
+                const Type* arg_type,
+                const Size* size,
+                types::Nullability nullability,
+                std::unique_ptr<Type>* out_type) const {
+        return true;
+    }
+
+private:
+    Library* library_;
+    TypeDecl* type_decl_;
+};
 
 Typespace Typespace::RootTypes(ErrorReporter* error_reporter) {
     Typespace root_typespace(error_reporter);
@@ -355,6 +378,168 @@ Typespace Typespace::RootTypes(ErrorReporter* error_reporter) {
 
 Libraries::Libraries() {
 
+}
+
+bool Library::Fail(StringView message) {
+    error_reporter_->ReportError(message);
+    return false;
+}
+
+bool Library::Fail(const SourceLocation& location, StringView message) {
+    error_reporter_->ReportError(location, message);
+    return false;
+}
+
+bool Library::CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
+                                        SourceLocation location, Name* name_out) {
+    const auto& components = compound_identifier->components;
+    assert(components.size() >= 1);
+
+    SourceLocation decl_name = components.back()->location();
+
+    if (components.size() == 1) {
+        *name_out = Name(this, decl_name);
+        return true;
+    }
+
+    std::vector<StringView> library_name;
+    for (auto iter = components.begin(); iter != components.end() - 1; ++iter) {
+        library_name.push_back((*iter)->location().data());
+    }
+
+    auto filename = location.source_file().filename();
+    Library* dep_library = nullptr;
+    if (!dependencies_.Lookup(filename, library_name, &dep_library)) {
+        std::string message("Unknown dependent library ");
+        message += NameLibrary(library_name);
+        message += ". Did you require it with `using`?";
+        const auto& location = components[0]->location();
+        return Fail(location, message);
+    }
+
+    *name_out = Name(dep_library, decl_name);
+    return true;
+}
+
+void Library::RegisterConst(Const* decl) {
+    const Name* name = &decl->name;
+    constants_.emplace(name, decl);
+}
+
+bool Library::RegisterDecl(Decl* decl) {
+    const Name* name = &decl->name;
+    auto iter = declarations_.emplace(name, decl);
+    if (!iter.second) {
+        std::string message = "Name collision: ";
+        message.append(name->name_part());
+        return Fail(*name, message);
+    }
+    switch (decl->kind) {
+    case Decl::Kind::kStruct: {
+        auto type_decl = static_cast<TypeDecl*>(decl);
+        auto type_template = std::make_unique<TypeDeclTypeTemplate>(
+            Name(name->library(), std::string(name->name_part())),
+            typespace_, error_reporter_, this, type_decl);
+        typespace_->AddTemplate(std::move(type_template));
+        break;
+    }
+    default:
+        assert(decl->kind == Decl::Kind::kConst);
+    }
+    return true;
+}
+
+bool Library::ConsumeConstant(std::unique_ptr<raw::Constant> raw_constant, SourceLocation location,
+                              std::unique_ptr<Constant>* out_constant) {
+    switch (raw_constant->kind) {
+    case raw::Constant::Kind::kIdentifier: {
+        auto identifier = static_cast<raw::IdentifierConstant*>(raw_constant.get());
+        Name name;
+        if (!CompileCompoundIdentifier(identifier->identifier.get(), location, &name))
+            return false;
+        *out_constant = std::make_unique<IdentifierConstant>(std::move(name));
+        break;
+    }
+    case raw::Constant::Kind::kLiteral: {
+        auto literal = static_cast<raw::LiteralConstant*>(raw_constant.get());
+        *out_constant = std::make_unique<LiteralConstant>(std::move(literal->literal));
+        break;
+    }
+    }
+    return true;
+}
+
+bool Library::ConsumeTypeConstructor(std::unique_ptr<raw::TypeConstructor> raw_type_ctor,
+                                     SourceLocation location,
+                                     std::unique_ptr<TypeConstructor>* out_type_ctor) {
+    Name name;
+    if (!CompileCompoundIdentifier(raw_type_ctor->identifier.get(), location, &name))
+        return false;
+
+    std::unique_ptr<TypeConstructor> maybe_arg_type_ctor;
+    if (raw_type_ctor->maybe_arg_type_ctor != nullptr) {
+        if (!ConsumeTypeConstructor(std::move(raw_type_ctor->maybe_arg_type_ctor), location, &maybe_arg_type_ctor))
+            return false;
+    }
+
+    std::unique_ptr<Constant> maybe_size;
+    if (raw_type_ctor->maybe_size != nullptr) {
+        if (!ConsumeConstant(std::move(raw_type_ctor->maybe_size), location, &maybe_size))
+            return false;
+    }
+
+    *out_type_ctor = std::make_unique<TypeConstructor>(
+        std::move(name),
+        std::move(maybe_arg_type_ctor),
+        std::move(maybe_size),
+        raw_type_ctor->nullability);
+    return true;
+}
+
+bool Library::ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> const_declaration) {
+    auto location = const_declaration->identifier->location();
+    auto name = Name(this, location);
+
+    std::unique_ptr<TypeConstructor> type_ctor;
+    if (!ConsumeTypeConstructor(std::move(const_declaration->type_ctor), location, &type_ctor))
+        return false;
+
+    std::unique_ptr<Constant> constant;
+    if (!ConsumeConstant(std::move(const_declaration->constant), location, &constant))
+        return false;
+
+    const_declarations_.push_back(std::make_unique<Const>(std::move(name), std::move(type_ctor), std::move(constant)));
+
+    auto decl = const_declarations_.back().get();
+    RegisterConst(decl);
+    return RegisterDecl(decl);
+} 
+
+bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
+    // validate the library name of this file
+    std::vector<StringView> new_name;
+    for (const auto& part : file->library_name->components) {
+        new_name.push_back(part->location().data());
+    }
+    // when would this every not be true? it doesn't look like we initialize library
+    // name before calling ConsumeFile, and we only call ConsumeFile once.
+    if (!library_name_.empty()) {
+        if (new_name != library_name_) {
+            return Fail(file->library_name->components[0]->location(),
+                        "Tow files in the library disagree about the library name");
+        }
+    } else {
+        library_name_ = new_name;
+    }
+
+    auto const_declaration_list = std::move(file->const_declaration_list);
+    for (auto& const_declaration : const_declaration_list) {
+        if (!ConsumeConstDeclaration(std::move(const_declaration))) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 } // namespace flat

@@ -8,6 +8,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "error_reporter.h"
@@ -16,6 +17,12 @@
 
 namespace fidl {
 namespace flat {
+
+template <typename T>
+struct PtrCompare {
+    bool operator()(const T* left, const T* right) const { return *left < *right; }
+};
+
 
 class Typespace;
 struct Decl;
@@ -719,17 +726,70 @@ private:
     std::map<std::vector<StringView>, std::unique_ptr<Library>> all_libraries_;
 };
 
+class Dependencies {
+public:
+    bool Register(StringView filename, Library* dep_library,
+                  const std::unique_ptr<raw::Identifier>& maybe_alias);
+
+    bool Lookup(StringView filename, const std::vector<StringView>& name,
+                Library** out_library);
+
+    const std::set<Library*>& dependencies() const { return dependencies_aggregate_; }
+
+private:
+    bool InsertByName(StringView filename, const std::vector<StringView>& name,
+                      Library* library);
+
+    using ByName = std::map<std::vector<StringView>, Library*>;
+    using ByFilename = std::map<std::string, std::unique_ptr<ByName>>;
+
+    ByFilename dependencies_;
+    std::set<Library*> dependencies_aggregate_;
+};
+
 class Library {
 public:
     Library(const Libraries* all_libraries, ErrorReporter* error_reporter, Typespace* typespace)
         : all_libraries_(all_libraries), error_reporter_(error_reporter), typespace_(typespace) {}
 
+    bool ConsumeFile(std::unique_ptr<raw::File> File);
+
     const std::vector<StringView>& name() const { return library_name_; }
 
     std::vector<StringView> library_name_;
 
+    std::vector<std::unique_ptr<Const>> const_declarations_;
+
 private:
+    bool Fail(StringView message);
+    bool Fail(const SourceLocation& location, StringView message);
+    bool Fail(const Name& name, StringView message) {
+        if (name.is_anonymous()) {
+            return Fail(message);
+        }
+        return Fail(name.source_location(), message);
+    }
+    bool Fail(const Decl& decl, StringView message) { return Fail(decl.name, message); }
+
+    bool CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
+                                   SourceLocation location, Name* out_name);
+    void RegisterConst(Const* decl);
+    bool RegisterDecl(Decl* decl);
+
+    bool ConsumeConstant(std::unique_ptr<raw::Constant> raw_constant, SourceLocation location,
+                         std::unique_ptr<Constant>* out_constant);
+    bool ConsumeTypeConstructor(std::unique_ptr<raw::TypeConstructor> raw_type_ctor,
+                                SourceLocation location,
+                                std::unique_ptr<TypeConstructor>* out_type);
+
+    bool ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> const_declaration);
+
     const Libraries* all_libraries_;
+
+    Dependencies dependencies_;
+
+    std::map<const Name*, Decl*, PtrCompare<Name>> declarations_;
+    std::map<const Name*, Const*, PtrCompare<Name>> constants_;
 
     ErrorReporter* error_reporter_;
     Typespace* typespace_;

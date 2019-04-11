@@ -74,6 +74,13 @@ void ErrorReporter::ReportError(const Token& token, StringView message) {
     errors_.push_back(std::move(error));
 }
 
+// ReportError records the provided message.
+void ErrorReporter::ReportError(StringView message) {
+    std::string error("error: ");
+    error.append(message);
+    errors_.push_back(std::move(error));
+}
+
 void ErrorReporter::PrintReports() {
     for (const auto& error : errors_) {
         fprintf(stderr, "%s\n", error.data());
