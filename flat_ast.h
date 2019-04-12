@@ -753,11 +753,23 @@ public:
         : all_libraries_(all_libraries), error_reporter_(error_reporter), typespace_(typespace) {}
 
     bool ConsumeFile(std::unique_ptr<raw::File> File);
+    bool Compile();
+    bool CompileDecl(Decl* decl);
+
+    Decl* LookupDeclByName(const Name& name) const;
+
+    template <typename NumericType>
+    bool ParseNumericLiteral(const raw::NumericLiteral* literal, NumericType* out_value) const;
+
+    const std::set<Library*>& dependencies() const;
 
     const std::vector<StringView>& name() const { return library_name_; }
+    const std::vector<std::string>& errors() const { return error_reporter_->errors(); }
 
     std::vector<StringView> library_name_;
 
+    std::vector<Decl*> declaration_order_;
+    
     std::vector<std::unique_ptr<Const>> const_declarations_;
 
 private:
@@ -783,6 +795,30 @@ private:
                                 std::unique_ptr<TypeConstructor>* out_type);
 
     bool ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> const_declaration);
+
+    bool TypeCanBeConst(const Type* type);
+    const Type* TypeResolve(const Type* type);
+    bool TypeIsConvertibleTo(const Type* from_type, const Type* to_type);
+
+    // return the declaration corresponding to name.
+    Decl* LookupConstant(const TypeConstructor* type_ctor, const Name& name);
+
+    bool DeclDependencies(Decl* decl, std::set<Decl*>* out_edges);
+
+    bool SortDeclarations();
+
+    bool CompileLibraryName();
+
+    bool CompileConst(Const* const_declaration);
+    bool CompileStruct(Struct* struct_declaration);
+
+    bool CompileTypeConstructor(TypeConstructor* type, TypeShape* out_type_metadata);
+
+    bool ResolveConstant(Constant* constant, const Type* type);
+    bool ResolveIdentifierConstant(IdentifierConstant* identifier_constant, const Type* type);
+    bool ResolveLiteralConstant(LiteralConstant* literal_constant, const Type* type);
+
+    const PrimitiveType kSizeType = PrimitiveType(types::PrimitiveSubtype::kUint32);
 
     const Libraries* all_libraries_;
 

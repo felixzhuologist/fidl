@@ -18,7 +18,7 @@ cc_test(
 cc_library(
     name = "flat_ast",
     srcs = ["flat_ast.cpp"],
-    hdrs = ["flat_ast.h", "typeshape.h"],
+    hdrs = ["flat_ast.h", "typeshape.h", "utils.h"],
     deps = [":raw_ast", ":error_reporter"],
 )
 

@@ -144,7 +144,28 @@ int compile(fidl::ErrorReporter* error_reporter,
         return 1;
       }
     }
+
+    if (!library->Compile()) {
+      return 1;
+    }
+
+    final_library = library.get();
+    if (!all_libraries.Insert(std::move(library))) {
+        const auto& name = library->name();
+        Fail("Mulitple libraries with the same name");
+    }
   }
+
+  if (final_library == nullptr) {
+    Fail("No library was produced.\n");
+  }
+
+  // Verify that the produced library's name matches the expected name.
+  // std::string final_name = NameLibrary(final_library->name());
+  // if (!library_name.empty() && final_name != library_name) {
+  //     Fail("Generated library '%s' did not match --name argument: %s\n",
+  //          final_name.data(), library_name.data());
+  // }
 
   return 0;
 }
