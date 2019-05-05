@@ -1,7 +1,7 @@
 cc_binary(
     name = "main",
     srcs = ["main.cpp"],
-    deps = [":lexer", ":parser", ":flat_ast"]
+    deps = [":lexer", ":parser", ":json_generator"]
 )
 
 cc_test(
@@ -13,6 +13,13 @@ cc_test(
         "@gtest//:gtest",
         "@gtest//:gtest_main",
     ]
+)
+
+cc_library(
+    name = "json_generator",
+    srcs = ["json_generator.cpp"],
+    hdrs = ["json_generator.h", "string_view.h"],
+    deps = [":flat_ast"]
 )
 
 cc_library(

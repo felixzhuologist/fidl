@@ -7,6 +7,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "source_manager.h"
+#include "json_generator.h"
 
 namespace {
 
@@ -124,6 +125,11 @@ bool Parse(const fidl::SourceFile& source_file,
   return true;
 }
 
+void Write(std::ostringstream output, std::fstream file) {
+  file << output.str();
+  file.flush();
+}
+
 } // namespace
 
 int compile(fidl::ErrorReporter* error_reporter,
@@ -151,7 +157,7 @@ int compile(fidl::ErrorReporter* error_reporter,
 
     final_library = library.get();
     if (!all_libraries.Insert(std::move(library))) {
-        const auto& name = library->name();
+        // const auto& name = library->name();
         Fail("Mulitple libraries with the same name");
     }
   }
@@ -166,6 +172,19 @@ int compile(fidl::ErrorReporter* error_reporter,
   //     Fail("Generated library '%s' did not match --name argument: %s\n",
   //          final_name.data(), library_name.data());
   // }
+
+  for (auto& output : outputs) {
+    auto& behavior = output.first;
+    auto& output_file = output.second;
+
+    switch (behavior) {
+    case Behavior::kJSON: {
+      fidl::JSONGenerator generator(final_library);
+      Write(generator.Produce(), std::move(output_file));
+      break;
+    }
+    }
+  }
 
   return 0;
 }
