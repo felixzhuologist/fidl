@@ -2,173 +2,18 @@
 #include <regex>
 #include <sstream>
 
+#include "names.h"
 #include "flat_ast.h"
 #include "utils.h"
 
 namespace fidl {
 namespace flat {
 
-std::string NamePrimitiveSubtype(types::PrimitiveSubtype subtype) {
-    switch (subtype) {
-    case types::PrimitiveSubtype::kInt8:
-        return "int8";
-    case types::PrimitiveSubtype::kInt16:
-        return "int16";
-    case types::PrimitiveSubtype::kInt32:
-        return "int32";
-    case types::PrimitiveSubtype::kInt64:
-        return "int64";
-    case types::PrimitiveSubtype::kUint8:
-        return "uint8";
-    case types::PrimitiveSubtype::kUint16:
-        return "uint16";
-    case types::PrimitiveSubtype::kUint32:
-        return "uint32";
-    case types::PrimitiveSubtype::kUint64:
-        return "uint64";
-    case types::PrimitiveSubtype::kBool:
-        return "bool";
-    case types::PrimitiveSubtype::kFloat32:
-        return "float32";
-    case types::PrimitiveSubtype::kFloat64:
-        return "float64";
-    }
-}
-
-std::string StringJoin(const std::vector<StringView>& strings, StringView separator) {
-    std::string result;
-    bool first = true;
-    for (const auto& part : strings) {
-        if (!first) {
-            result += separator;
-        }
-        first = false;
-        result += part;
-    }
-    return result;
-}
-
 std::string LibraryName(const Library* library, StringView separator) {
     if (library != nullptr) {
         return StringJoin(library->name(), separator);
     }
     return std::string();
-}
-
-std::string NameIdentifier(SourceLocation name) {
-    // TODO(TO-704) C name escaping and ergonomics.
-    return name.data();
-}
-
-std::string NameName(const flat::Name& name, StringView library_separator, StringView name_separator) {
-    std::string compiled_name("");
-    if (name.library() != nullptr) {
-        compiled_name += LibraryName(name.library(), library_separator);
-        compiled_name += name_separator;
-    }
-    compiled_name += name.name_part();
-    return compiled_name;
-}
-
-void NameFlatTypeConstructorHelper(std::ostringstream& buf,
-                                   const flat::TypeConstructor* type_ctor) {
-    buf << NameName(type_ctor->name, ".", "/");
-    if (type_ctor->maybe_arg_type_ctor) {
-        buf << "<";
-        NameFlatTypeConstructorHelper(buf, type_ctor->maybe_arg_type_ctor.get());
-        buf << ">";
-    }
-    if (type_ctor->maybe_size) {
-        auto size = static_cast<const flat::Size&>(type_ctor->maybe_size->Value());
-        if (size != flat::Size::Max()) {
-            buf << ":";
-            buf << size.value;
-        }
-    }
-    if (type_ctor->nullability == types::Nullability::kNullable) {
-        buf << "?";
-    }
-}
-
-std::string NameFlatTypeConstructor(const flat::TypeConstructor* type_ctor) {
-    std::ostringstream buf;
-    NameFlatTypeConstructorHelper(buf, type_ctor);
-    return buf.str();
-}
-
-std::string NameLibrary(const std::vector<StringView>& library_name) {
-    return StringJoin(library_name, ".");
-}
-
-std::string NameFlatConstant(const flat::Constant* constant) {
-    switch (constant->kind) {
-    case flat::Constant::Kind::kLiteral: {
-        auto literal_constant = static_cast<const flat::LiteralConstant*>(constant);
-        return literal_constant->literal->location().data();
-    }
-    case flat::Constant::Kind::kIdentifier: {
-        auto identifier_constant = static_cast<const flat::IdentifierConstant*>(constant);
-        return NameName(identifier_constant->name, ".", "/");
-    }
-    case flat::Constant::Kind::kSynthesized: {
-        return std::string("synthesized constant");
-    }
-    } // switch
-}
-
-void NameFlatTypeHelper(std::ostringstream& buf, const flat::Type* type) {
-    switch (type->kind) {
-    case flat::Type::Kind::kArray: {
-        auto array_type = static_cast<const flat::ArrayType*>(type);
-        buf << "array<";
-        NameFlatTypeHelper(buf, array_type->element_type);
-        buf << ">";
-        if (*array_type->element_count != flat::Size::Max()) {
-            buf << ":";
-            buf << array_type->element_count->value;
-        }
-        break;
-    }
-    case flat::Type::Kind::kVector: {
-        auto vector_type = static_cast<const flat::VectorType*>(type);
-        buf << "vector<";
-        NameFlatTypeHelper(buf, vector_type->element_type);
-        buf << ">";
-        if (*vector_type->element_count != flat::Size::Max()) {
-            buf << ":";
-            buf << vector_type->element_count->value;
-        }
-        break;
-    }
-    case flat::Type::Kind::kString: {
-        auto string_type = static_cast<const flat::StringType*>(type);
-        buf << "string";
-        if (*string_type->max_size != flat::Size::Max()) {
-            buf << ":";
-            buf << string_type->max_size->value;
-        }
-        break;
-    }
-    case flat::Type::Kind::kPrimitive: {
-        auto primitive_type = static_cast<const flat::PrimitiveType*>(type);
-        buf << NamePrimitiveSubtype(primitive_type->subtype);
-        break;
-    }
-    case flat::Type::Kind::kIdentifier: {
-        auto identifier_type = static_cast<const flat::IdentifierType*>(type);
-        buf << NameName(identifier_type->name, ".", "/");
-        break;
-    }
-    } // switch
-    if (type->nullability == types::Nullability::kNullable) {
-        buf << "?";
-    }
-}
-
-std::string NameFlatType(const flat::Type* type) {
-    std::ostringstream buf;
-    NameFlatTypeHelper(buf, type);
-    return buf.str();
 }
 
 uint32_t AlignTo(uint64_t size, uint64_t alignment) {

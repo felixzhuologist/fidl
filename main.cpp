@@ -5,6 +5,7 @@
 
 #include "flat_ast.h"
 #include "lexer.h"
+#include "names.h"
 #include "parser.h"
 #include "source_manager.h"
 #include "json_generator.h"
@@ -157,8 +158,9 @@ int compile(fidl::ErrorReporter* error_reporter,
 
     final_library = library.get();
     if (!all_libraries.Insert(std::move(library))) {
-        // const auto& name = library->name();
-        Fail("Mulitple libraries with the same name");
+        const auto& name = library->name();
+        Fail("Mulitple libraries with the same name: '%s'\n",
+             NameLibrary(name).data());
     }
   }
 
@@ -167,11 +169,11 @@ int compile(fidl::ErrorReporter* error_reporter,
   }
 
   // Verify that the produced library's name matches the expected name.
-  // std::string final_name = NameLibrary(final_library->name());
-  // if (!library_name.empty() && final_name != library_name) {
-  //     Fail("Generated library '%s' did not match --name argument: %s\n",
-  //          final_name.data(), library_name.data());
-  // }
+  std::string final_name = NameLibrary(final_library->name());
+  if (!library_name.empty() && final_name != library_name) {
+      Fail("Generated library '%s' did not match --name argument: %s\n",
+           final_name.data(), library_name.data());
+  }
 
   for (auto& output : outputs) {
     auto& behavior = output.first;

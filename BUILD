@@ -1,7 +1,7 @@
 cc_binary(
     name = "main",
     srcs = ["main.cpp"],
-    deps = [":lexer", ":parser", ":json_generator"]
+    deps = [":lexer", ":parser", ":json_generator", ":names"]
 )
 
 cc_test(
@@ -26,7 +26,7 @@ cc_library(
     name = "flat_ast",
     srcs = ["flat_ast.cpp"],
     hdrs = ["flat_ast.h", "typeshape.h", "utils.h"],
-    deps = [":raw_ast", ":error_reporter"],
+    deps = [":raw_ast", ":error_reporter", ":names"],
 )
 
 cc_library(
@@ -75,4 +75,10 @@ cc_library(
     name = "source_file",
     srcs = ["source_file.cpp"],
     hdrs = ["string_view.h", "source_file.h"],
+)
+
+cc_library(
+    name = "names",
+    srcs = ["names.cpp"],
+    hdrs = ["names.h", "raw_ast.h", "flat_ast.h", "string_view.h", "types.h", "error_reporter.h", "source_location.h", "source_manager.h", "source_file.h", "token.h", "token_definitions.inc", "typeshape.h"]
 )
