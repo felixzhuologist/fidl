@@ -36,6 +36,33 @@ std::string StringJoin(const std::vector<StringView>& strings, StringView separa
     return result;
 }
 
+std::string NamePrimitiveSubtype(types::PrimitiveSubtype subtype) {
+    switch (subtype) {
+    case types::PrimitiveSubtype::kInt8:
+        return "int8";
+    case types::PrimitiveSubtype::kInt16:
+        return "int16";
+    case types::PrimitiveSubtype::kInt32:
+        return "int32";
+    case types::PrimitiveSubtype::kInt64:
+        return "int64";
+    case types::PrimitiveSubtype::kUint8:
+        return "uint8";
+    case types::PrimitiveSubtype::kUint16:
+        return "uint16";
+    case types::PrimitiveSubtype::kUint32:
+        return "uint32";
+    case types::PrimitiveSubtype::kUint64:
+        return "uint64";
+    case types::PrimitiveSubtype::kBool:
+        return "bool";
+    case types::PrimitiveSubtype::kFloat32:
+        return "float32";
+    case types::PrimitiveSubtype::kFloat64:
+        return "float64";
+    }
+}
+
 std::string NameRawLiteralKind(raw::Literal::Kind kind) {
     switch (kind) {
     case raw::Literal::Kind::kString:
