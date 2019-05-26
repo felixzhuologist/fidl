@@ -434,6 +434,9 @@ bool Library::Fail(const SourceLocation& location, StringView message) {
     return false;
 }
 
+// is the second arg necessary? we only use it to get the filename, but we should
+// be able to do that using compound_identifier->location().source_file().filename()...
+// assuming the compound_identifier and location are always in the same file.
 bool Library::CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
                                         SourceLocation location, Name* name_out) {
     const auto& components = compound_identifier->components;
@@ -559,18 +562,39 @@ bool Library::ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> con
     return RegisterDecl(decl);
 } 
 
+bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration) {
+    auto name = Name(this, struct_declaration->identifier->location());
+
+    std::vector<Struct::Member> members;
+    for (auto& member : struct_declaration->members) {
+        std::unique_ptr<TypeConstructor> type_ctor;
+        auto location = member->identifier->location();
+        if (!ConsumeTypeConstructor(std::move(member->type_ctor), location, &type_ctor))
+            return false;
+        std::unique_ptr<Constant> maybe_default_value;
+        if (member->maybe_default_value != nullptr) {
+            if (!ConsumeConstant(std::move(member->maybe_default_value), location, &maybe_default_value))
+                return false;
+        }
+        members.emplace_back(std::move(type_ctor), location, std::move(maybe_default_value));
+    }
+
+    struct_declarations_.push_back(
+        std::make_unique<Struct>(std::move(name), std::move(members)));
+    return RegisterDecl(struct_declarations_.back().get());
+}
+
 bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
     // validate the library name of this file
     std::vector<StringView> new_name;
     for (const auto& part : file->library_name->components) {
         new_name.push_back(part->location().data());
     }
-    // when would this every not be true? it doesn't look like we initialize library
-    // name before calling ConsumeFile, and we only call ConsumeFile once.
+
     if (!library_name_.empty()) {
         if (new_name != library_name_) {
             return Fail(file->library_name->components[0]->location(),
-                        "Tow files in the library disagree about the library name");
+                        "Two files in the library disagree about the library name");
         }
     } else {
         library_name_ = new_name;
@@ -579,6 +603,13 @@ bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
     auto const_declaration_list = std::move(file->const_declaration_list);
     for (auto& const_declaration : const_declaration_list) {
         if (!ConsumeConstDeclaration(std::move(const_declaration))) {
+            return false;
+        }
+    }
+
+    auto struct_declaration_list = std::move(file->struct_declaration_list);
+    for (auto& struct_declaration : struct_declaration_list) {
+        if (!ConsumeStructDeclaration(std::move(struct_declaration))) {
             return false;
         }
     }
@@ -928,7 +959,22 @@ bool Library::DeclDependencies(Decl* decl, std::set<Decl*>* out_edges) {
     std::set<Decl*> edges;
 
     auto maybe_add_decl = [this, &edges](const TypeConstructor* type_ctor) {
-        return;
+        for (;;) {
+            const auto& name = type_ctor->name;
+            if (name.name_part() == "request") {
+                return;
+            } else if (type_ctor->maybe_arg_type_ctor) {
+                // I think this is assuming that no user defined types have arg types?
+                type_ctor = type_ctor->maybe_arg_type_ctor.get();
+            } else if (type_ctor->nullability == types::Nullability::kNullable) {
+                return;
+            } else {
+                if (auto decl = LookupDeclByName(name); decl) {
+                    edges.insert(decl);
+                }
+                return;
+            }
+        }
     };
 
     auto maybe_add_constant = [this, &edges](const TypeConstructor* type_ctor, const Constant* constant) -> bool {

@@ -1,4 +1,3 @@
-#include <iostream>
 #include "parser.h"
 
 namespace fidl {
@@ -214,9 +213,71 @@ std::unique_ptr<raw::ConstDeclaration> Parser::ParseConstDeclaration(ASTScope& s
         scope.GetSourceElement(), std::move(type_ctor), std::move(identifier), std::move(constant));
 }
 
+std::unique_ptr<raw::StructMember> Parser::ParseStructMember() {
+    ASTScope scope(this);
+    auto type_ctor = ParseTypeConstructor();
+    if (!Ok())
+        return Fail();
+    auto identifier = ParseIdentifier();
+    if (!Ok())
+        return Fail();
+
+    std::unique_ptr<raw::Constant> maybe_default_value;
+    if (MaybeConsumeToken(OfKind(Token::Kind::kEqual))) {
+        if (!Ok())
+            return Fail();
+        maybe_default_value = ParseConstant();
+        if (!Ok())
+            return Fail();
+    }
+
+    return std::make_unique<raw::StructMember>(
+        scope.GetSourceElement(), std::move(type_ctor), std::move(identifier), std::move(maybe_default_value));
+}
+
+std::unique_ptr<raw::StructDeclaration> Parser::ParseStructDeclaration(ASTScope& scope) {
+    std::vector<std::unique_ptr<raw::StructMember>> members;
+
+    ConsumeToken(IdentifierOfSubkind(Token::Subkind::kStruct));
+    if (!Ok())
+        return Fail();
+
+    auto identifier = ParseIdentifier();
+    if (!Ok())
+        return Fail();
+
+    ConsumeToken(OfKind(Token::Kind::kLeftCurly));
+    if (!Ok())
+        return Fail();
+
+    auto parse_member = [&members, this]() {
+        if (Peek().kind() == Token::Kind::kRightCurly) {
+            ConsumeToken(OfKind(Token::Kind::kRightCurly));
+            return Done;
+        } else {
+            members.emplace_back(ParseStructMember());
+            return More;
+        }
+    };
+
+    while (parse_member() == More) {
+        if (!Ok())
+            Fail();
+        ConsumeToken(OfKind(Token::Kind::kSemicolon));
+        if (!Ok())
+            Fail();
+    }
+    if (!Ok())
+        Fail();
+
+    return std::make_unique<raw::StructDeclaration>(
+        scope.GetSourceElement(), std::move(identifier), std::move(members));
+}
+
 std::unique_ptr<raw::File> Parser::ParseFile() {
     ASTScope scope(this);
     std::vector<std::unique_ptr<raw::ConstDeclaration>> const_declaration_list;
+    std::vector<std::unique_ptr<raw::StructDeclaration>> struct_declaration_list;
 
     ConsumeToken(IdentifierOfSubkind(Token::Subkind::kLibrary));
     if (!Ok())
@@ -230,7 +291,7 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
     if (!Ok())
         return Fail();
 
-    auto parse_decl = [&const_declaration_list, this]() {
+    auto parse_decl = [&const_declaration_list, &struct_declaration_list, this]() {
         ASTScope scope(this);
 
         switch (Peek().combined()) {
@@ -238,6 +299,9 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
             return Done;
         case CASE_IDENTIFIER(Token::Subkind::kConst):
             const_declaration_list.emplace_back(ParseConstDeclaration(scope));
+            return More;
+        case CASE_IDENTIFIER(Token::Subkind::kStruct):
+            struct_declaration_list.emplace_back(ParseStructDeclaration(scope));
             return More;
         }
     };
@@ -258,7 +322,8 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
         scope.GetSourceElement(),
         end,
         std::move(library_name),
-        std::move(const_declaration_list));
+        std::move(const_declaration_list),
+        std::move(struct_declaration_list));
 }
 
 } // namespace fidl

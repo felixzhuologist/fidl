@@ -63,12 +63,32 @@ void ConstDeclaration::Accept(TreeVisitor& visitor) {
     visitor.OnConstant(constant);
 }
 
+void StructMember::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    visitor.OnTypeConstructor(type_ctor);
+    visitor.OnIdentifier(identifier);
+    if (maybe_default_value != nullptr) {
+        visitor.OnConstant(maybe_default_value);
+    }
+}
+
+void StructDeclaration::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    visitor.OnIdentifier(identifier);
+    for (auto member = members.begin(); member != members.end(); ++member) {
+        visitor.OnStructMember(*member);
+    }
+}
+
 void File::Accept(TreeVisitor& visitor) {
     SourceElementMark sem(visitor, *this);
 
     visitor.OnCompoundIdentifier(library_name);
     for (auto& i : const_declaration_list) {
         visitor.OnConstDeclaration(i);
+    }
+    for (auto& i : struct_declaration_list) {
+        visitor.OnStructDeclaration(i);
     }
 }
 

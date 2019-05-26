@@ -689,7 +689,7 @@ public:
 
     void AddTemplate(std::unique_ptr<TypeTemplate> type_template);
 
-    // BoostrapRootTypes creates a instance with all primitive types. It is
+    // RootTypes creates a instance with all primitive types. It is
     // meant to be used as the top-level types lookup mechanism, providing
     // definitional meaning to names such as `int64`, or `bool`.
     static Typespace RootTypes(ErrorReporter* error_reporter);
@@ -771,6 +771,7 @@ public:
     std::vector<Decl*> declaration_order_;
     
     std::vector<std::unique_ptr<Const>> const_declarations_;
+    std::vector<std::unique_ptr<Struct>> struct_declarations_;
 
 private:
     bool Fail(StringView message);
@@ -795,6 +796,7 @@ private:
                                 std::unique_ptr<TypeConstructor>* out_type);
 
     bool ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> const_declaration);
+    bool ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration);
 
     bool TypeCanBeConst(const Type* type);
     const Type* TypeResolve(const Type* type);

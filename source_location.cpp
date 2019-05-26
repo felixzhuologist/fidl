@@ -13,7 +13,7 @@ std::string SourceLocation::position() const {
     position.push_back(':');
     position.append(std::to_string(pos.line));
     position.push_back(':');
-    position.append(std::to_string(pos.line));
+    position.append(std::to_string(pos.column));
     return position;
 }
 

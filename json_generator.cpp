@@ -112,6 +112,30 @@ void JSONGenerator::GenerateArray(Iterator begin, Iterator end) {
     EmitArrayEnd(&json_file_);
 }
 
+template<>
+void JSONGenerator::GenerateArray(
+    std::vector<std::unique_ptr<flat::Struct>>::const_iterator begin,
+    std::vector<std::unique_ptr<flat::Struct>>::const_iterator end) {
+    EmitArrayBegin(&json_file_);
+
+    bool is_first = true;
+    for (std::vector<std::unique_ptr<flat::Struct>>::const_iterator it = begin; it != end; ++it) {
+        if ((*it)->anonymous)
+            continue;
+        if (is_first) {
+            EmitNewlineAndIdent(&json_file_, ++indent_level_);
+            is_first = false;
+        } else {
+            EmitArraySeparator(&json_file_, indent_level_);
+        }
+        Generate(*it);
+    }
+    if (!is_first)
+        EmitNewlineAndIdent(&json_file_, --indent_level_);
+
+    EmitArrayEnd(&json_file_);
+}
+
 template <typename Collection>
 void JSONGenerator::GenerateArray(const Collection& collection) {
     GenerateArray(collection.begin(), collection.end());
@@ -284,6 +308,34 @@ void JSONGenerator::Generate(const flat::Const& value) {
     });
 }
 
+void JSONGenerator::Generate(const flat::Struct& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        GenerateObjectMember("location", NameLocation(value.name));
+        GenerateObjectMember("anonymous", value.anonymous);
+        GenerateObjectMember("members", value.members);
+        GenerateObjectMember("size", value.typeshape.Size());
+        GenerateObjectMember("max_out_of_line", value.typeshape.MaxOutOfLine());
+        GenerateObjectMember("alignment", value.typeshape.Alignment());
+        GenerateObjectMember("max_handles", value.typeshape.MaxHandles());
+    });
+}
+
+void JSONGenerator::Generate(const flat::Struct::Member& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("type", value.type_ctor->type, Position::kFirst);
+        GenerateObjectMember("name", value.name);
+        GenerateObjectMember("location", NameLocation(value.name));
+        if (value.maybe_default_value)
+            GenerateObjectMember("maybe_default_value", value.maybe_default_value);
+        GenerateObjectMember("size", value.fieldshape.Size());
+        GenerateObjectMember("max_out_of_line", value.fieldshape.MaxOutOfLine());
+        GenerateObjectMember("alignment", value.fieldshape.Alignment());
+        GenerateObjectMember("offset", value.fieldshape.Offset());
+        GenerateObjectMember("max_handles", value.fieldshape.MaxHandles());
+    });
+}
+
 void JSONGenerator::Generate(const flat::Library* library) {
     GenerateObject([&]() {
         auto library_name = flat::LibraryName(library, ".");
@@ -308,6 +360,12 @@ void JSONGenerator::GenerateDeclarationsMember(const flat::Library* library, Pos
         int count = 0;
         for (const auto& decl : library->const_declarations_)
             GenerateDeclarationsEntry(count++, decl->name, "const");
+
+        for (const auto& decl : library->struct_declarations_) {
+            if (decl->anonymous)
+                continue;
+            GenerateDeclarationsEntry(count++, decl->name, "struct");
+        }
     });
 }
 
@@ -346,6 +404,7 @@ std::ostringstream JSONGenerator::Produce() {
         GenerateObjectMember("library_dependencies", dependencies);
 
         GenerateObjectMember("const_declarations", library_->const_declarations_);
+        GenerateObjectMember("struct_declarations", library_->struct_declarations_);
 
         std::vector<std::string> declaration_order;
         for (flat::Decl* decl : library_->declaration_order_) {

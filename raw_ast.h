@@ -189,21 +189,55 @@ public:
     std::unique_ptr<Constant> constant;
 };
 
+class StructMember : public SourceElement {
+public:
+    StructMember(SourceElement const& element,
+                 std::unique_ptr<TypeConstructor> type_ctor,
+                 std::unique_ptr<Identifier> identifier,
+                 std::unique_ptr<Constant> maybe_default_value)
+    : SourceElement(element),
+      type_ctor(std::move(type_ctor)),
+      identifier(std::move(identifier)),
+      maybe_default_value(std::move(maybe_default_value)) {}
+
+      void Accept(TreeVisitor& visitor);
+
+      std::unique_ptr<TypeConstructor> type_ctor;
+      std::unique_ptr<Identifier> identifier;
+      std::unique_ptr<Constant> maybe_default_value;
+};
+
+class StructDeclaration : public SourceElement {
+public:
+    StructDeclaration(SourceElement const& element,
+                      std::unique_ptr<Identifier> identifier,
+                      std::vector<std::unique_ptr<StructMember>> members)
+    : SourceElement(element), identifier(std::move(identifier)), members(std::move(members)) {}
+
+    void Accept(TreeVisitor& visitor);
+
+    std::unique_ptr<Identifier> identifier;
+    std::vector<std::unique_ptr<StructMember>> members;
+};
+
 class File : public SourceElement {
 public:
     File(SourceElement const& element,
          Token end,
          std::unique_ptr<CompoundIdentifier> library_name,
-         std::vector<std::unique_ptr<ConstDeclaration>> const_declaration_list)
+         std::vector<std::unique_ptr<ConstDeclaration>> const_declaration_list,
+         std::vector<std::unique_ptr<StructDeclaration>> struct_declaration_list)
         : SourceElement(element),
           library_name(std::move(library_name)),
           const_declaration_list(std::move(const_declaration_list)),
+          struct_declaration_list(std::move(struct_declaration_list)),
           end_(end) {}
 
     void Accept(TreeVisitor& visitor);
 
     std::unique_ptr<CompoundIdentifier> library_name;
     std::vector<std::unique_ptr<ConstDeclaration>> const_declaration_list;
+    std::vector<std::unique_ptr<StructDeclaration>> struct_declaration_list;
     Token end_;
 };
 

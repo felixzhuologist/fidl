@@ -29,7 +29,7 @@ private:
         }
 
         ASTScope(Parser* parser, bool suppress)
-            : parser_(parser), suppress_(suppress) {
+            : parser_(parser) {
             parser_->active_ast_scopes_.push_back(raw::SourceElement(Token(), Token()));
             suppress_ = parser_->suppress_gap_checks_;
             parser_->suppress_gap_checks_ = suppress;
@@ -61,13 +61,20 @@ private:
             Fail("Internal compiler error: unbalanced parse tree");
         }
 
-        // ?????
         if (!suppress_gap_checks_) {
+            // the previous_token_ condition seems to be redundant: it is only
+            // true for the very first token (since Lex() will never return a kNotAToken)
+            // but last_was_gap_start_ can't be true in this case
+
+            // the first condition is true if previous_token_ is the start of this scope
+            // and. we are therefore setting gap_start_ to be the gap between the
+            // first and second tokens of this scope
             if (last_was_gap_start_ && previous_token_.kind() != Token::Kind::kNotAToken) {
                 gap_start_ = token.previous_end();
                 last_was_gap_start_ = false;
             }
 
+            // mark that this token is the first of the topmost scope
             if (active_ast_scopes_.back().start_.kind() == Token::kNotAToken) {
                 last_was_gap_start_ = true;
             }
@@ -78,11 +85,12 @@ private:
         }
 
         for (auto& scope : active_ast_scopes_) {
-            // why not just check if valid()?
             if (scope.start_.kind() == Token::Kind::kNotAToken) {
                 scope.start_ = token;
             }
         }
+
+        previous_token_ = token;
     }
 
     template<class Predicate>
@@ -91,10 +99,9 @@ private:
         if (failure_message) {
             Fail(*failure_message);
         }
-        // previous doensn't get updated??
+        UpdateMarks(last_token_);
         auto token = last_token_;
         last_token_ = Lex();
-        UpdateMarks(token);
         return token;
     }
 
@@ -104,7 +111,6 @@ private:
         if (failure_message) {
             return false;
         }
-        previous_token_ = last_token_;
         UpdateMarks(last_token_);
         last_token_ = Lex();
         return true;
@@ -154,6 +160,9 @@ private:
     std::unique_ptr<raw::TypeConstructor> ParseTypeConstructor();
 
     std::unique_ptr<raw::ConstDeclaration> ParseConstDeclaration(ASTScope&);
+
+    std::unique_ptr<raw::StructMember> ParseStructMember();
+    std::unique_ptr<raw::StructDeclaration> ParseStructDeclaration(ASTScope&);
 
     std::unique_ptr<raw::File> ParseFile();
 

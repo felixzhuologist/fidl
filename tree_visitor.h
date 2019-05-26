@@ -10,7 +10,7 @@ class TreeVisitor {
 public:
     virtual void OnSourceElementStart(const SourceElement& element) {}
     virtual void OnSourceElementEnd(const SourceElement& element) {}
-    
+
     virtual void OnIdentifier(std::unique_ptr<Identifier> const& element) {
         element->Accept(*this);
     }
@@ -42,7 +42,7 @@ public:
         }
         default:
             // Die!
-            break; 
+            break;
         }
     }
 
@@ -96,6 +96,14 @@ public:
     }
 
     virtual void OnConstDeclaration(std::unique_ptr<ConstDeclaration> const& element) {
+        element->Accept(*this);
+    }
+
+    virtual void OnStructMember(std::unique_ptr<StructMember> const& element) {
+        element->Accept(*this);
+    }
+
+    virtual void OnStructDeclaration(std::unique_ptr<StructDeclaration> const& element) {
         element->Accept(*this);
     }
 
