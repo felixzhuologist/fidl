@@ -790,7 +790,7 @@ private:
     bool Fail(const Decl& decl, StringView message) { return Fail(decl.name, message); }
 
     bool CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
-                                   SourceLocation location, Name* out_name);
+                                   Name* out_name);
     void RegisterConst(Const* decl);
     bool RegisterDecl(Decl* decl);
 

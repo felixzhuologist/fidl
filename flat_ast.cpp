@@ -506,11 +506,8 @@ bool Library::Fail(const SourceLocation& location, StringView message) {
     return false;
 }
 
-// is the second arg necessary? we only use it to get the filename, but we should
-// be able to do that using compound_identifier->location().source_file().filename()...
-// assuming the compound_identifier and location are always in the same file.
 bool Library::CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
-                                        SourceLocation location, Name* name_out) {
+                                        Name* name_out) {
     const auto& components = compound_identifier->components;
     assert(components.size() >= 1);
 
@@ -526,7 +523,7 @@ bool Library::CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_
         library_name.push_back((*iter)->location().data());
     }
 
-    auto filename = location.source_file().filename();
+    auto filename = decl_name.source_file().filename();
     Library* dep_library = nullptr;
     if (!dependencies_.Lookup(filename, library_name, &dep_library)) {
         std::string message("Unknown dependent library ");
@@ -574,7 +571,7 @@ bool Library::ConsumeConstant(std::unique_ptr<raw::Constant> raw_constant, Sourc
     case raw::Constant::Kind::kIdentifier: {
         auto identifier = static_cast<raw::IdentifierConstant*>(raw_constant.get());
         Name name;
-        if (!CompileCompoundIdentifier(identifier->identifier.get(), location, &name))
+        if (!CompileCompoundIdentifier(identifier->identifier.get(), &name))
             return false;
         *out_constant = std::make_unique<IdentifierConstant>(std::move(name));
         break;
@@ -592,7 +589,7 @@ bool Library::ConsumeTypeConstructor(std::unique_ptr<raw::TypeConstructor> raw_t
                                      SourceLocation location,
                                      std::unique_ptr<TypeConstructor>* out_type_ctor) {
     Name name;
-    if (!CompileCompoundIdentifier(raw_type_ctor->identifier.get(), location, &name))
+    if (!CompileCompoundIdentifier(raw_type_ctor->identifier.get(), &name))
         return false;
 
     std::unique_ptr<TypeConstructor> maybe_arg_type_ctor;
