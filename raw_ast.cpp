@@ -56,6 +56,19 @@ void TypeConstructor::Accept(TreeVisitor& visitor) {
     visitor.OnNullability(nullability);
 }
 
+void UsingLibrary::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    visitor.OnCompoundIdentifier(using_path);
+    if (maybe_alias != nullptr)
+        visitor.OnIdentifier(maybe_alias);
+}
+
+void UsingAlias::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    visitor.OnIdentifier(alias);
+    visitor.OnTypeConstructor(type_ctor);
+}
+
 void ConstDeclaration::Accept(TreeVisitor& visitor) {
     SourceElementMark sem(visitor, *this);
     visitor.OnTypeConstructor(type_ctor);

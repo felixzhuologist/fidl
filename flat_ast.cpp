@@ -330,6 +330,68 @@ private:
     TypeDecl* type_decl_;
 };
 
+class TypeAliasTypeTemplate : public TypeTemplate {
+public:
+    TypeAliasTypeTemplate(Name name, Typespace* typespace, ErrorReporter* error_reporter,
+                          Library* library, std::unique_ptr<TypeConstructor> partial_type_ctor)
+        : TypeTemplate(std::move(name), typespace, error_reporter),
+          library_(library), partial_type_ctor_(std::move(partial_type_ctor)) {}
+
+    bool Create(const SourceLocation& location,
+                const Type* maybe_arg_type,
+                const Size* maybe_size,
+                types::Nullability maybe_nullability,
+                std::unique_ptr<Type>* out_type) const {
+        const Type* arg_type = nullptr;
+        if (partial_type_ctor_->maybe_arg_type_ctor) {
+            if (maybe_arg_type) {
+                return Fail(location, "cannot parametrize twice");
+            }
+            if (!partial_type_ctor_->maybe_arg_type_ctor->type) {
+                if (!library_->CompileTypeConstructor(
+                        partial_type_ctor_->maybe_arg_type_ctor.get(),
+                        nullptr /* out_typeshape */))
+                    return false;
+            }
+            arg_type = partial_type_ctor_->maybe_arg_type_ctor->type;
+        } else {
+            arg_type = maybe_arg_type;
+        }
+
+        const Size* size = nullptr;
+        if (partial_type_ctor_->maybe_size) {
+            if (maybe_size)
+                return Fail(location, "cannot bind twice");
+            if (!library_->ResolveConstant(partial_type_ctor_->maybe_size.get(), &library_->kSizeType))
+                return Fail(location, "unable to parse size bound");
+            size = static_cast<const Size*>(&partial_type_ctor_->maybe_size->Value());
+        } else {
+            size = maybe_size;
+        }
+
+        types::Nullability nullability;
+        if (partial_type_ctor_->nullability == types::Nullability::kNullable) {
+            if (maybe_nullability == types::Nullability::kNullable) {
+                return Fail(location, "cannot indicate nullability twice");
+            }
+            nullability = types::Nullability::kNullable;
+        } else {
+            nullability = maybe_nullability;
+        }
+
+        return typespace_->CreateNotOwned(
+            partial_type_ctor_->name,
+            arg_type,
+            size,
+            nullability,
+            out_type);
+    }
+
+private:
+    Library* library_;
+    std::unique_ptr<TypeConstructor> partial_type_ctor_;
+};
+
 Typespace Typespace::RootTypes(ErrorReporter* error_reporter) {
     Typespace root_typespace(error_reporter);
 
@@ -377,6 +439,16 @@ bool Libraries::Insert(std::unique_ptr<Library> library) {
     std::vector<fidl::StringView> library_name = library->name();
     auto iter = all_libraries_.emplace(library_name, std::move(library));
     return iter.second;
+}
+
+bool Libraries::Lookup(const std::vector<StringView>& library_name,
+                       Library** out_library) const {
+    auto iter = all_libraries_.find(library_name);
+    if (iter == all_libraries_.end())
+        return false;
+
+    *out_library = iter->second.get();
+    return true;
 }
 
 bool Dependencies::Register(StringView filename, Library* dep_library,
@@ -543,6 +615,58 @@ bool Library::ConsumeTypeConstructor(std::unique_ptr<raw::TypeConstructor> raw_t
     return true;
 }
 
+bool Library::ConsumeUsing(std::unique_ptr<raw::Using> using_directive) {
+    switch (using_directive->kind) {
+    case raw::Using::Kind::kLibrary: {
+        auto using_library = static_cast<raw::UsingLibrary*>(using_directive.get());
+        return ConsumeUsingLibrary(using_library);
+    }
+    case raw::Using::Kind::kAlias: {
+        auto using_alias = static_cast<raw::UsingAlias*>(using_directive.get());
+        return ConsumeTypeAlias(using_alias);
+    }
+    }
+}
+
+bool Library::ConsumeUsingLibrary(raw::UsingLibrary* using_library) {
+    std::vector<StringView> library_name;
+    for (const auto& component : using_library->using_path->components) {
+        library_name.push_back(component->location().data());
+    }
+
+    Library* dep_library = nullptr;
+    if (!all_libraries_->Lookup(library_name, &dep_library)) {
+        std::string message("Could not find library named ");
+        message += NameLibrary(library_name);
+        message += ". Did you include its sources with --files?";
+        const auto& location = using_library->using_path->components[0]->location();
+        return Fail(location, message);
+    }
+
+    auto filename = using_library->location().source_file().filename();
+    if (!dependencies_.Register(filename, dep_library, using_library->maybe_alias)) {
+        std::string message("Library ");
+        message += NameLibrary(library_name);
+        message += " already imported. Did you required it twice?";
+        return Fail(message);
+    }
+
+    const auto& declarations = dep_library->declarations_;
+    declarations_.insert(declarations.begin(), declarations.end());
+    return true;
+}
+
+bool Library::ConsumeTypeAlias(raw::UsingAlias* using_alias) {
+    auto location = using_alias->alias->location();
+    auto alias_name = Name(this, location);
+    std::unique_ptr<TypeConstructor> partial_type_ctor_;
+    if (!ConsumeTypeConstructor(std::move(using_alias->type_ctor), location, &partial_type_ctor_))
+        return false;
+    typespace_->AddTemplate(std::make_unique<TypeAliasTypeTemplate>(
+        std::move(alias_name), typespace_, error_reporter_, this, std::move(partial_type_ctor_)));
+    return true;
+}
+
 bool Library::ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> const_declaration) {
     auto location = const_declaration->identifier->location();
     auto name = Name(this, location);
@@ -598,6 +722,12 @@ bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
         }
     } else {
         library_name_ = new_name;
+    }
+
+    auto using_list = std::move(file->using_list);
+    for (auto& using_directive : using_list) {
+        if (!ConsumeUsing(std::move(using_directive)))
+            return false;
     }
 
     auto const_declaration_list = std::move(file->const_declaration_list);

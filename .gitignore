@@ -1,6 +1,7 @@
 main
 *.o
 test.fidl
+test2.fidl
 out.json
 
 bazel-bin

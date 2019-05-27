@@ -146,6 +146,38 @@ std::unique_ptr<raw::Constant> Parser::ParseConstant() {
     }
 }
 
+std::unique_ptr<raw::Using> Parser::ParseUsing() {
+    ASTScope scope(this);
+    ConsumeToken(IdentifierOfSubkind(Token::Subkind::kUsing));
+    if (!Ok())
+        return Fail();
+    auto using_path = ParseCompoundIdentifier();
+    if (!Ok())
+        return Fail();
+
+    std::unique_ptr<raw::Identifier> maybe_alias;
+    std::unique_ptr<raw::TypeConstructor> type_ctor;
+
+    if (MaybeConsumeToken(IdentifierOfSubkind(Token::Subkind::kAs))) {
+        if (!Ok())
+            return Fail();
+        maybe_alias = ParseIdentifier();
+        if (!Ok())
+            return Fail();
+    } else if (MaybeConsumeToken(OfKind(Token::Kind::kEqual))) {
+        if (!Ok() || using_path->components.size() != 1u)
+            return Fail();
+        type_ctor = ParseTypeConstructor();
+        if (!Ok())
+            return Fail();
+        return std::make_unique<raw::UsingAlias>(
+            scope.GetSourceElement(), std::move(using_path->components[0]), std::move(type_ctor));
+    }
+
+    return std::make_unique<raw::UsingLibrary>(
+        scope.GetSourceElement(), std::move(using_path), std::move(maybe_alias));
+}
+
 std::unique_ptr<raw::TypeConstructor> Parser::ParseTypeConstructor() {
     ASTScope scope(this);
     auto identifier = ParseCompoundIdentifier();
@@ -186,6 +218,27 @@ std::unique_ptr<raw::TypeConstructor> Parser::ParseTypeConstructor() {
         std::move(maybe_arg_type_ctor),
         std::move(maybe_size),
         nullability);
+}
+
+std::unique_ptr<raw::UsingAlias> Parser::ParseUsingAlias(ASTScope& scope) {
+    ConsumeToken(IdentifierOfSubkind(Token::Subkind::kUsing));
+    if (!Ok())
+        return Fail();
+
+    auto identifier = ParseIdentifier();
+    if (!Ok())
+        return Fail();
+
+    ConsumeToken(OfKind(Token::Kind::kEqual));
+    if (!Ok())
+        return Fail();
+
+    auto type_ctor = ParseTypeConstructor();
+    if (!Ok())
+        return Fail();
+
+    return std::make_unique<raw::UsingAlias>(
+        scope.GetSourceElement(), std::move(identifier), std::move(type_ctor));
 }
 
 std::unique_ptr<raw::ConstDeclaration> Parser::ParseConstDeclaration(ASTScope& scope) {
@@ -276,6 +329,7 @@ std::unique_ptr<raw::StructDeclaration> Parser::ParseStructDeclaration(ASTScope&
 
 std::unique_ptr<raw::File> Parser::ParseFile() {
     ASTScope scope(this);
+    std::vector<std::unique_ptr<raw::Using>> using_list;
     std::vector<std::unique_ptr<raw::ConstDeclaration>> const_declaration_list;
     std::vector<std::unique_ptr<raw::StructDeclaration>> struct_declaration_list;
 
@@ -291,17 +345,42 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
     if (!Ok())
         return Fail();
 
-    auto parse_decl = [&const_declaration_list, &struct_declaration_list, this]() {
+    auto parse_using = [&using_list, this]() {
         ASTScope scope(this);
 
         switch (Peek().combined()) {
         default:
             return Done;
+
+        case CASE_IDENTIFIER(Token::Subkind::kUsing):
+            using_list.emplace_back(ParseUsing());
+            return More;
+        }
+    };
+
+    while (parse_using() == More) {
+        if (!Ok())
+            return Fail();
+        ConsumeToken(OfKind(Token::Kind::kSemicolon));
+        if (!Ok())
+            return Fail();
+    }
+
+    auto parse_decl = [&using_list, &const_declaration_list, &struct_declaration_list, this]() {
+        ASTScope scope(this);
+
+        switch (Peek().combined()) {
+        default:
+            return Done;
+
         case CASE_IDENTIFIER(Token::Subkind::kConst):
             const_declaration_list.emplace_back(ParseConstDeclaration(scope));
             return More;
         case CASE_IDENTIFIER(Token::Subkind::kStruct):
             struct_declaration_list.emplace_back(ParseStructDeclaration(scope));
+            return More;
+        case CASE_IDENTIFIER(Token::Subkind::kUsing):
+            using_list.emplace_back(ParseUsingAlias(scope));
             return More;
         }
     };
@@ -322,6 +401,7 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
         scope.GetSourceElement(),
         end,
         std::move(library_name),
+        std::move(using_list),
         std::move(const_declaration_list),
         std::move(struct_declaration_list));
 }

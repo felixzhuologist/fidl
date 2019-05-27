@@ -157,6 +157,9 @@ private:
 
     std::unique_ptr<raw::Constant> ParseConstant();
 
+    std::unique_ptr<raw::Using> ParseUsing();
+    std::unique_ptr<raw::UsingAlias> ParseUsingAlias(ASTScope&);
+
     std::unique_ptr<raw::TypeConstructor> ParseTypeConstructor();
 
     std::unique_ptr<raw::ConstDeclaration> ParseConstDeclaration(ASTScope&);

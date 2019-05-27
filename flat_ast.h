@@ -722,6 +722,9 @@ public:
 
     bool Insert(std::unique_ptr<Library> library);
 
+    bool Lookup(const std::vector<StringView>& library_name,
+                Library** out_library) const;
+
 private:
     std::map<std::vector<StringView>, std::unique_ptr<Library>> all_libraries_;
 };
@@ -774,6 +777,8 @@ public:
     std::vector<std::unique_ptr<Struct>> struct_declarations_;
 
 private:
+    friend class TypeAliasTypeTemplate;
+    
     bool Fail(StringView message);
     bool Fail(const SourceLocation& location, StringView message);
     bool Fail(const Name& name, StringView message) {
@@ -794,6 +799,10 @@ private:
     bool ConsumeTypeConstructor(std::unique_ptr<raw::TypeConstructor> raw_type_ctor,
                                 SourceLocation location,
                                 std::unique_ptr<TypeConstructor>* out_type);
+
+    bool ConsumeUsing(std::unique_ptr<raw::Using> using_directive);
+    bool ConsumeUsingLibrary(raw::UsingLibrary* using_library);
+    bool ConsumeTypeAlias(raw::UsingAlias* using_alias);
 
     bool ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> const_declaration);
     bool ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration);

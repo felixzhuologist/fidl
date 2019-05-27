@@ -171,6 +171,47 @@ public:
     types::Nullability nullability;
 };
 
+class Using : public SourceElement {
+public:
+    enum class Kind {
+      kLibrary,
+      kAlias,
+    };
+
+    explicit Using(SourceElement const& element, Kind kind)
+        : SourceElement(element), kind(kind) {}
+
+    virtual ~Using() {}
+
+    const Kind kind;
+};
+
+class UsingLibrary : public Using {
+public:
+  UsingLibrary(SourceElement const& element, std::unique_ptr<CompoundIdentifier> using_path,
+        std::unique_ptr<Identifier> maybe_alias)
+      : Using(element, Kind::kLibrary), using_path(std::move(using_path)),
+        maybe_alias(std::move(maybe_alias)) {}
+
+  void Accept(TreeVisitor& visitor);
+
+  std::unique_ptr<CompoundIdentifier> using_path;
+  std::unique_ptr<Identifier> maybe_alias;
+};
+
+class UsingAlias : public Using {
+public:
+  UsingAlias(SourceElement const& element,
+        std::unique_ptr<Identifier> alias,
+        std::unique_ptr<TypeConstructor> type_ctor)
+      : Using(element, Kind::kAlias), alias(std::move(alias)), type_ctor(std::move(type_ctor)) {}
+
+  void Accept(TreeVisitor& visitor);
+
+  std::unique_ptr<Identifier> alias;
+  std::unique_ptr<TypeConstructor> type_ctor;
+};
+
 class ConstDeclaration : public SourceElement {
 public:
     ConstDeclaration(SourceElement const& element,
@@ -225,10 +266,12 @@ public:
     File(SourceElement const& element,
          Token end,
          std::unique_ptr<CompoundIdentifier> library_name,
+         std::vector<std::unique_ptr<Using>> using_list,
          std::vector<std::unique_ptr<ConstDeclaration>> const_declaration_list,
          std::vector<std::unique_ptr<StructDeclaration>> struct_declaration_list)
         : SourceElement(element),
           library_name(std::move(library_name)),
+          using_list(std::move(using_list)),
           const_declaration_list(std::move(const_declaration_list)),
           struct_declaration_list(std::move(struct_declaration_list)),
           end_(end) {}
@@ -236,6 +279,7 @@ public:
     void Accept(TreeVisitor& visitor);
 
     std::unique_ptr<CompoundIdentifier> library_name;
+    std::vector<std::unique_ptr<Using>> using_list;
     std::vector<std::unique_ptr<ConstDeclaration>> const_declaration_list;
     std::vector<std::unique_ptr<StructDeclaration>> struct_declaration_list;
     Token end_;
