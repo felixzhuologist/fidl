@@ -432,8 +432,54 @@ Typespace Typespace::RootTypes(ErrorReporter* error_reporter) {
     return root_typespace;
 }
 
-Libraries::Libraries() {
+void AttributeSchema::ValidatePlacement(ErrorReporter* error_reporter,
+                                   const raw::Attribute* attribute,
+                                   Placement placement) const {
+    if (allowed_placements_.size() == 0)
+        return;
+    auto iter = allowed_placements_.find(placement);
+    if (iter != allowed_placements_.end())
+        return;
+    std::string message("placement of attribute '");
+    message.append(attribute->name);
+    message.append("' disallowed here");
+    error_reporter->ReportError(attribute->location(), message);
+}
 
+void AttributeSchema::ValidateValue(ErrorReporter* error_reporter,
+                                    const raw::Attribute* attribute) const {
+    if (allowed_values_.size() == 0)
+        return;
+    auto iter = allowed_values_.find(attribute->value);
+    if (iter != allowed_values_.end())
+        return;
+    std::string message("attribute '");
+    message.append(attribute->name);
+    message.append("' has invalid value '");
+    message.append(attribute->value);
+    message.append("', should be one of '");
+    bool first = true;
+    for (const auto& hint : allowed_values_) {
+        if (!first)
+            message.append(", ");
+        message.append(hint);
+        message.append("'");
+        first = false;
+    }
+    error_reporter->ReportError(attribute->location(), message);
+}
+
+Libraries::Libraries() {
+    AddAttributeSchema("Doc", AttributeSchema({
+        /* any placement */
+    }, {
+        /* any value */
+    }));
+    AddAttributeSchema("MaxBytes", AttributeSchema({
+        AttributeSchema::Placement::kStructDecl,
+    }, {
+        /* any value */
+    }));
 }
 
 bool Libraries::Insert(std::unique_ptr<Library> library) {
@@ -450,6 +496,25 @@ bool Libraries::Lookup(const std::vector<StringView>& library_name,
 
     *out_library = iter->second.get();
     return true;
+}
+
+const AttributeSchema* Libraries::RetrieveAttributeSchema(
+    ErrorReporter* error_reporter, const raw::Attribute* attribute) const {
+    const auto& name = attribute->name;
+    auto iter = attribute_schemas_.find(name);
+    if (iter != attribute_schemas_.end()) {
+        const auto& schema = iter->second;
+        return &schema;
+    }
+
+    // TODO: typo check
+    if (error_reporter) {
+        std::string message("unknown attribute: '");
+        message.append(name);
+        message.append("'");
+        error_reporter->ReportWarning(attribute->location(), message);
+    }
+    return nullptr;
 }
 
 bool Dependencies::Register(StringView filename, Library* dep_library,
@@ -505,6 +570,19 @@ bool Library::Fail(StringView message) {
 bool Library::Fail(const SourceLocation& location, StringView message) {
     error_reporter_->ReportError(location, message);
     return false;
+}
+
+void Library::ValidateAttributesPlacement(AttributeSchema::Placement placement,
+                                          const raw::AttributeList* attributes) {
+    if (attributes == nullptr)
+        return;
+    for (const auto& attribute : attributes->attributes) {
+        auto schema = all_libraries_->RetrieveAttributeSchema(error_reporter_, attribute.get());
+        if (schema != nullptr) {
+            schema->ValidatePlacement(error_reporter_, attribute.get(), placement);
+            schema->ValidateValue(error_reporter_, attribute.get());
+        }
+    }
 }
 
 bool Library::CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
@@ -716,6 +794,7 @@ bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> s
 
 bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
     if (file->attributes) {
+        ValidateAttributesPlacement(AttributeSchema::Placement::kLibrary, file->attributes.get());
         if (!attributes_) {
             attributes_ = std::move(file->attributes);
         } else {
@@ -731,7 +810,7 @@ bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
                 attributes_builder.Done());
         }
     }
-    
+
     // validate the library name of this file
     std::vector<StringView> new_name;
     for (const auto& part : file->library_name->components) {

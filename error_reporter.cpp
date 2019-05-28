@@ -81,6 +81,21 @@ void ErrorReporter::ReportError(StringView message) {
     errors_.push_back(std::move(error));
 }
 
+// ReportWarning records a warning with the location, message, source line, and
+// position indicator.
+//
+//     filename:line:col: warning: message
+//     sourceline
+//        ^
+void ErrorReporter::ReportWarning(const SourceLocation& location, StringView message) {
+    if (warnings_as_errors_) {
+        ReportError(location, message);
+        return;
+    }
+    auto error = Format("warning", location, message);
+    warnings_.push_back(std::move(error));
+}
+
 void ErrorReporter::PrintReports() {
     for (const auto& error : errors_) {
         fprintf(stderr, "%s\n", error.data());

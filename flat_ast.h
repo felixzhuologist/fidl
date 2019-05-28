@@ -725,6 +725,56 @@ private:
     ErrorReporter* error_reporter_;
 };
 
+// Defines a set of rules for validating an attribute, consisting of
+// - The allowed placement of an attribute (e.g. on a method, on a struct
+//   declaration);
+// - The allowed values which an attribute can take.
+// For attributes which may be placed on declarations (e.g. interface, struct,
+// union, table), a schema may additionally include:
+// - A constraint which must be met by the declaration.
+class AttributeSchema {
+public:
+    using Constraint = std::function<bool(ErrorReporter* error_reporter,
+                                          const raw::Attribute* attribute,
+                                          const Decl* decl)>;
+
+    enum class Placement {
+        kConstDecl,
+        kLibrary,
+        kStructDecl,
+        kStructMember,
+    };
+
+    AttributeSchema(const std::set<Placement>& allowed_placements,
+                    const std::set<std::string> allowed_values,
+                    Constraint constraint = NoOpConstraint)
+        : allowed_placements_(allowed_placements),
+          allowed_values_(allowed_values),
+          constraint_(std::move(constraint)) {}
+
+    AttributeSchema(AttributeSchema&& schema) = default;
+
+    void ValidatePlacement(ErrorReporter* error_reporter,
+                           const raw::Attribute* attribute,
+                           Placement placement) const;
+
+    void ValidateValue(ErrorReporter* error_reporter,
+                       const raw::Attribute* attribute) const;
+
+private:
+    static bool NoOpConstraint(ErrorReporter* error_reporter,
+                               const raw::Attribute* attribute,
+                               const Decl* decl) {
+        return true;
+    }
+
+    // set of allowed placements; an empty set implies all placements are allowed
+    std::set<Placement> allowed_placements_;
+    // set of allowed values; an empty set implies all values are allowed
+    std::set<std::string> allowed_values_;
+    Constraint constraint_;
+};
+
 class Libraries {
 public:
     Libraries();
@@ -734,8 +784,20 @@ public:
     bool Lookup(const std::vector<StringView>& library_name,
                 Library** out_library) const;
 
+    void AddAttributeSchema(const std::string& name, AttributeSchema schema) {
+        [[maybe_unused]] auto iter =
+            attribute_schemas_.emplace(name, std::move(schema));
+        assert(iter.second && "do not add schemas twice");
+    }
+
+    const AttributeSchema* RetrieveAttributeSchema(
+        ErrorReporter* error_reporter,
+        const raw::Attribute* attribute) const;
+
 private:
     std::map<std::vector<StringView>, std::unique_ptr<Library>> all_libraries_;
+    // map from valid attribute names to their schemas
+    std::map<std::string, AttributeSchema> attribute_schemas_;
 };
 
 class Dependencies {
@@ -798,8 +860,8 @@ private:
     }
     bool Fail(const Decl& decl, StringView message) { return Fail(decl.name, message); }
 
-    // void ValidateAttributesPlacement(AttributeSchema::Placement placement,
-                                     // const raw::AttributeList* attributes);
+    void ValidateAttributesPlacement(AttributeSchema::Placement placement,
+                                     const raw::AttributeList* attributes);
 
     bool CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
                                    Name* out_name);
