@@ -233,6 +233,20 @@ void JSONGenerator::Generate(const raw::Literal& value) {
     });
 }
 
+void JSONGenerator::Generate(const raw::Attribute& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        if (value.value != "")
+            GenerateObjectMember("value", value.value);
+        else
+            GenerateObjectMember("value", StringView());
+    });
+}
+
+void JSONGenerator::Generate(const raw::AttributeList& value) {
+    Generate(value.attributes);
+}
+
 void JSONGenerator::Generate(const flat::Constant& value) {
     GenerateObject([&]() {
         GenerateObjectMember("kind", NameFlatConstantKind(value.kind), Position::kFirst);
@@ -303,6 +317,8 @@ void JSONGenerator::Generate(const flat::Const& value) {
     GenerateObject([&]() {
         GenerateObjectMember("name", value.name, Position::kFirst);
         GenerateObjectMember("location", NameLocation(value.name));
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
         GenerateObjectMember("type", value.type_ctor->type);
         GenerateObjectMember("value", value.value);
     });
@@ -313,6 +329,8 @@ void JSONGenerator::Generate(const flat::Struct& value) {
         GenerateObjectMember("name", value.name, Position::kFirst);
         GenerateObjectMember("location", NameLocation(value.name));
         GenerateObjectMember("anonymous", value.anonymous);
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
         GenerateObjectMember("members", value.members);
         GenerateObjectMember("size", value.typeshape.Size());
         GenerateObjectMember("max_out_of_line", value.typeshape.MaxOutOfLine());
@@ -326,6 +344,8 @@ void JSONGenerator::Generate(const flat::Struct::Member& value) {
         GenerateObjectMember("type", value.type_ctor->type, Position::kFirst);
         GenerateObjectMember("name", value.name);
         GenerateObjectMember("location", NameLocation(value.name));
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
         if (value.maybe_default_value)
             GenerateObjectMember("maybe_default_value", value.maybe_default_value);
         GenerateObjectMember("size", value.fieldshape.Size());

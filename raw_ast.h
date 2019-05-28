@@ -150,6 +150,35 @@ public:
     void Accept(TreeVisitor& visitor);
 };
 
+class Attribute : public SourceElement {
+public:
+    Attribute(SourceElement const& element, std::string name, std::string value)
+        : SourceElement(element), name(std::move(name)), value(std::move(value)) {}
+
+    void Accept(TreeVisitor& visitor);
+
+    const std::string name;
+    const std::string value;
+};
+
+class AttributeList : public SourceElement {
+public:
+    AttributeList(SourceElement const& element, std::vector<std::unique_ptr<Attribute>> attributes)
+        : SourceElement(element), attributes(std::move(attributes)) {}
+
+    bool HasAttribute(std::string name) const {
+        for (const auto& attribute : attributes) {
+            if (attribute->name == name)
+                return true;
+        }
+        return false;
+    }
+
+    void Accept(TreeVisitor& visitor);
+
+    std::vector<std::unique_ptr<Attribute>> attributes;
+};
+
 class TypeConstructor final : public SourceElement {
 public:
     TypeConstructor(SourceElement const& element,
@@ -215,16 +244,19 @@ public:
 class ConstDeclaration : public SourceElement {
 public:
     ConstDeclaration(SourceElement const& element,
+                     std::unique_ptr<AttributeList> attributes,
                      std::unique_ptr<TypeConstructor> type_ctor,
                      std::unique_ptr<Identifier> identifier,
                      std::unique_ptr<Constant> constant)
         : SourceElement(element),
+          attributes(std::move(attributes)),
           type_ctor(std::move(type_ctor)),
           identifier(std::move(identifier)),
           constant(std::move(constant)) {}
 
     void Accept(TreeVisitor& visitor);
 
+    std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<TypeConstructor> type_ctor;
     std::unique_ptr<Identifier> identifier;
     std::unique_ptr<Constant> constant;
@@ -233,16 +265,19 @@ public:
 class StructMember : public SourceElement {
 public:
     StructMember(SourceElement const& element,
+                 std::unique_ptr<AttributeList> attributes,
                  std::unique_ptr<TypeConstructor> type_ctor,
                  std::unique_ptr<Identifier> identifier,
                  std::unique_ptr<Constant> maybe_default_value)
     : SourceElement(element),
+      attributes(std::move(attributes)),
       type_ctor(std::move(type_ctor)),
       identifier(std::move(identifier)),
       maybe_default_value(std::move(maybe_default_value)) {}
 
       void Accept(TreeVisitor& visitor);
 
+      std::unique_ptr<AttributeList> attributes;
       std::unique_ptr<TypeConstructor> type_ctor;
       std::unique_ptr<Identifier> identifier;
       std::unique_ptr<Constant> maybe_default_value;
@@ -251,12 +286,17 @@ public:
 class StructDeclaration : public SourceElement {
 public:
     StructDeclaration(SourceElement const& element,
+                      std::unique_ptr<AttributeList> attributes,
                       std::unique_ptr<Identifier> identifier,
                       std::vector<std::unique_ptr<StructMember>> members)
-    : SourceElement(element), identifier(std::move(identifier)), members(std::move(members)) {}
+    : SourceElement(element),
+      attributes(std::move(attributes)),
+      identifier(std::move(identifier)),
+      members(std::move(members)) {}
 
     void Accept(TreeVisitor& visitor);
 
+    std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<Identifier> identifier;
     std::vector<std::unique_ptr<StructMember>> members;
 };
@@ -265,11 +305,13 @@ class File : public SourceElement {
 public:
     File(SourceElement const& element,
          Token end,
+         std::unique_ptr<AttributeList> attributes,
          std::unique_ptr<CompoundIdentifier> library_name,
          std::vector<std::unique_ptr<Using>> using_list,
          std::vector<std::unique_ptr<ConstDeclaration>> const_declaration_list,
          std::vector<std::unique_ptr<StructDeclaration>> struct_declaration_list)
         : SourceElement(element),
+          attributes(std::move(attributes)),
           library_name(std::move(library_name)),
           using_list(std::move(using_list)),
           const_declaration_list(std::move(const_declaration_list)),
@@ -278,6 +320,7 @@ public:
 
     void Accept(TreeVisitor& visitor);
 
+    std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<CompoundIdentifier> library_name;
     std::vector<std::unique_ptr<Using>> using_list;
     std::vector<std::unique_ptr<ConstDeclaration>> const_declaration_list;

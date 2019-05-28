@@ -2,6 +2,7 @@
 #include <regex>
 #include <sstream>
 
+#include "attributes.h"
 #include "names.h"
 #include "flat_ast.h"
 #include "utils.h"
@@ -676,7 +677,8 @@ bool Library::ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> con
     if (!ConsumeConstant(std::move(const_declaration->constant), location, &constant))
         return false;
 
-    const_declarations_.push_back(std::make_unique<Const>(std::move(name), std::move(type_ctor), std::move(constant)));
+    const_declarations_.push_back(std::make_unique<Const>(
+        std::move(name), std::move(const_declaration->attributes), std::move(type_ctor), std::move(constant)));
 
     auto decl = const_declarations_.back().get();
     RegisterConst(decl);
@@ -697,15 +699,39 @@ bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> s
             if (!ConsumeConstant(std::move(member->maybe_default_value), location, &maybe_default_value))
                 return false;
         }
-        members.emplace_back(std::move(type_ctor), location, std::move(maybe_default_value));
+        members.emplace_back(
+            std::move(member->attributes),
+            std::move(type_ctor),
+            location,
+            std::move(maybe_default_value));
     }
 
     struct_declarations_.push_back(
-        std::make_unique<Struct>(std::move(name), std::move(members)));
+        std::make_unique<Struct>(
+            std::move(name),
+            std::move(struct_declaration->attributes),
+            std::move(members)));
     return RegisterDecl(struct_declarations_.back().get());
 }
 
 bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
+    if (file->attributes) {
+        if (!attributes_) {
+            attributes_ = std::move(file->attributes);
+        } else {
+            AttributesBuilder attributes_builder(error_reporter_, std::move(attributes_->attributes));
+            for (auto& attribute : file->attributes->attributes) {
+                if (!attributes_builder.Insert(std::move(attribute)))
+                    return false;
+            }
+            attributes_ = std::make_unique<raw::AttributeList>(
+                // looks like there's no real "correct" way to do this, as we
+                // are combining parser nodes from multiple files into one
+                raw::SourceElement(file->attributes->start_, file->attributes->end_),
+                attributes_builder.Done());
+        }
+    }
+    
     // validate the library name of this file
     std::vector<StringView> new_name;
     for (const auto& part : file->library_name->components) {

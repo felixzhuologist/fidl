@@ -46,6 +46,17 @@ void LiteralConstant::Accept(TreeVisitor& visitor) {
     visitor.OnLiteral(literal);
 }
 
+void Attribute::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+}
+
+void AttributeList::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    for (auto& i : attributes) {
+        visitor.OnAttribute(i);
+    }
+}
+
 void TypeConstructor::Accept(TreeVisitor& visitor) {
     SourceElementMark sem(visitor, *this);
     visitor.OnCompoundIdentifier(identifier);
@@ -71,6 +82,9 @@ void UsingAlias::Accept(TreeVisitor& visitor) {
 
 void ConstDeclaration::Accept(TreeVisitor& visitor) {
     SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
     visitor.OnTypeConstructor(type_ctor);
     visitor.OnIdentifier(identifier);
     visitor.OnConstant(constant);
@@ -78,6 +92,9 @@ void ConstDeclaration::Accept(TreeVisitor& visitor) {
 
 void StructMember::Accept(TreeVisitor& visitor) {
     SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
     visitor.OnTypeConstructor(type_ctor);
     visitor.OnIdentifier(identifier);
     if (maybe_default_value != nullptr) {
@@ -87,6 +104,9 @@ void StructMember::Accept(TreeVisitor& visitor) {
 
 void StructDeclaration::Accept(TreeVisitor& visitor) {
     SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
     visitor.OnIdentifier(identifier);
     for (auto member = members.begin(); member != members.end(); ++member) {
         visitor.OnStructMember(*member);
@@ -95,8 +115,15 @@ void StructDeclaration::Accept(TreeVisitor& visitor) {
 
 void File::Accept(TreeVisitor& visitor) {
     SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
 
     visitor.OnCompoundIdentifier(library_name);
+    for (auto& i : using_list) {
+        visitor.OnUsing(i);
+    }
+
     for (auto& i : const_declaration_list) {
         visitor.OnConstDeclaration(i);
     }

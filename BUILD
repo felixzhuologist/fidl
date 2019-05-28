@@ -26,14 +26,14 @@ cc_library(
     name = "flat_ast",
     srcs = ["flat_ast.cpp"],
     hdrs = ["flat_ast.h", "typeshape.h", "utils.h"],
-    deps = [":raw_ast", ":error_reporter", ":names"],
+    deps = [":raw_ast", ":attributes", ":error_reporter", ":names"],
 )
 
 cc_library(
     name = "parser",
     srcs = ["parser.cpp"],
     hdrs = ["parser.h"],
-    deps = [":lexer", ":raw_ast"],
+    deps = [":lexer", ":raw_ast", ":attributes"],
 )
 
 cc_library(
@@ -41,6 +41,13 @@ cc_library(
     srcs = ["lexer.cpp"],
     hdrs = ["lexer.h", "token.h", "token_definitions.inc"],
     deps = [":source_location", ":error_reporter"],
+)
+
+cc_library(
+    name = "attributes",
+    srcs = ["attributes.cpp"],
+    hdrs = ["attributes.h", "error_reporter.h"],
+    deps = [":raw_ast"]
 )
 
 cc_library(

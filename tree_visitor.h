@@ -91,8 +91,39 @@ public:
         element->Accept(*this);
     }
 
+    virtual void OnAttribute(std::unique_ptr<Attribute> const& element) {
+        element->Accept(*this);
+    }
+
+    virtual void OnAttributeList(std::unique_ptr<AttributeList> const& element) {
+        element->Accept(*this);
+    }
+
     virtual void OnTypeConstructor(std::unique_ptr<TypeConstructor> const& element) {
         element->Accept(*this);
+    }
+
+    virtual void OnUsing(std::unique_ptr<Using> const& element) {
+        Using::Kind kind = element->kind;
+        switch(kind) {
+        case Using::Kind::kLibrary: {
+            UsingLibrary* ptr = static_cast<UsingLibrary*>(element.get());
+            OnUsingLibrary(*ptr);
+            break;
+        }
+        case Using::Kind::kAlias: {
+            UsingAlias* ptr = static_cast<UsingAlias*>(element.get());
+            OnUsingAlias(*ptr);
+            break;
+        }
+        }
+    }
+    virtual void OnUsingLibrary(UsingLibrary& element) {
+        element.Accept(*this);
+    }
+
+    virtual void OnUsingAlias(UsingAlias& element) {
+        element.Accept(*this);
     }
 
     virtual void OnConstDeclaration(std::unique_ptr<ConstDeclaration> const& element) {

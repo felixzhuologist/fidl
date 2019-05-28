@@ -1,3 +1,4 @@
+#include "attributes.h"
 #include "parser.h"
 
 namespace fidl {
@@ -124,6 +125,94 @@ std::unique_ptr<raw::Literal> Parser::ParseLiteral() {
     }
 }
 
+std::unique_ptr<raw::Attribute> Parser::ParseAttribute() {
+    ASTScope scope(this);
+    auto name = ParseIdentifier();
+    if (!Ok())
+        return Fail();
+    std::unique_ptr<raw::StringLiteral> value;
+    if (MaybeConsumeToken(OfKind(Token::Kind::kEqual))) {
+        value = ParseStringLiteral();
+        if (!Ok())
+            return Fail();
+    }
+
+    std::string str_name("");
+    std::string str_value("");
+    if (name)
+        str_name = std::string(name->location().data().data(), name->location().data().size());
+    if (value) {
+        auto data = value->location().data();
+        // wouldn't this always be true if ParseStringLiteral succeeded?
+        if (data.size() >= 2 && data[0] == '"' && data[data.size() - 1] == '"') {
+            str_value = std::string(data.data() + 1, data.size() - 2);
+        }
+    }
+    return std::make_unique<raw::Attribute>(scope.GetSourceElement(), str_name, str_value);
+}
+
+std::unique_ptr<raw::AttributeList>
+Parser::ParseAttributeList(std::unique_ptr<raw::Attribute>&& doc_comment, ASTScope& scope) {
+    AttributesBuilder attributes_builder(error_reporter_);
+    if (doc_comment) {
+        if (!attributes_builder.Insert(std::move(doc_comment)))
+            return Fail();
+    }
+    ConsumeToken(OfKind(Token::Kind::kLeftSquare));
+    if (!Ok())
+        return Fail();
+    for (;;) {
+        auto attribute = ParseAttribute();
+        if (!Ok())
+            return Fail();
+        if (!attributes_builder.Insert(std::move(attribute)))
+            return Fail();
+        if (!MaybeConsumeToken(OfKind(Token::Kind::kComma)))
+            break;
+    }
+    ConsumeToken(OfKind(Token::Kind::kRightSquare));
+    if (!Ok())
+        return Fail();
+    auto attribute_list = std::make_unique<raw::AttributeList>(scope.GetSourceElement(), attributes_builder.Done());
+    return attribute_list;
+}
+
+std::unique_ptr<raw::Attribute> Parser::ParseDocComment() {
+    ASTScope scope(this);
+    std::string str_value("");
+
+    Token doc_line;
+    while (Peek().kind() == Token::Kind::kDocComment) {
+        doc_line = ConsumeToken(OfKind(Token::Kind::kDocComment));
+        // exclude the "///" part of the comment (each Token corresponds to
+        // an entire line)
+        auto data = doc_line.location().data();
+        str_value += std::string(data.data() + 3, data.size() - 2);
+        // why assert instead of just returning Fail() like everywhere else?
+        assert(Ok());
+    }
+    return std::make_unique<raw::Attribute>(scope.GetSourceElement(), "Doc", str_value);
+}
+
+std::unique_ptr<raw::AttributeList> Parser::MaybeParseAttributeList() {
+    ASTScope scope(this);
+    std::unique_ptr<raw::Attribute> doc_comment;
+    if (Peek().kind() == Token::Kind::kDocComment) {
+        doc_comment = ParseDocComment();
+    }
+    if (Peek().kind() == Token::Kind::kLeftSquare) {
+        return ParseAttributeList(std::move(doc_comment), scope);
+    }
+
+    if (doc_comment) {
+        AttributesBuilder attributes_builder(error_reporter_);
+        if (!attributes_builder.Insert(std::move(doc_comment)))
+            return Fail();
+        return std::make_unique<raw::AttributeList>(scope.GetSourceElement(), attributes_builder.Done());
+    }
+    return nullptr;
+}
+
 std::unique_ptr<raw::Constant> Parser::ParseConstant() {
     switch (Peek().combined()) {
     case CASE_TOKEN(Token::Kind::kIdentifier): {
@@ -241,7 +330,8 @@ std::unique_ptr<raw::UsingAlias> Parser::ParseUsingAlias(ASTScope& scope) {
         scope.GetSourceElement(), std::move(identifier), std::move(type_ctor));
 }
 
-std::unique_ptr<raw::ConstDeclaration> Parser::ParseConstDeclaration(ASTScope& scope) {
+std::unique_ptr<raw::ConstDeclaration>
+Parser::ParseConstDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope) {
     ConsumeToken(IdentifierOfSubkind(Token::Subkind::kConst));
     if (!Ok())
         return Fail();
@@ -263,11 +353,18 @@ std::unique_ptr<raw::ConstDeclaration> Parser::ParseConstDeclaration(ASTScope& s
         return Fail();
 
     return std::make_unique<raw::ConstDeclaration>(
-        scope.GetSourceElement(), std::move(type_ctor), std::move(identifier), std::move(constant));
+        scope.GetSourceElement(),
+        std::move(attributes),
+        std::move(type_ctor),
+        std::move(identifier),
+        std::move(constant));
 }
 
 std::unique_ptr<raw::StructMember> Parser::ParseStructMember() {
     ASTScope scope(this);
+    auto attributes = MaybeParseAttributeList();
+    if (!Ok())
+        return Fail();
     auto type_ctor = ParseTypeConstructor();
     if (!Ok())
         return Fail();
@@ -285,10 +382,15 @@ std::unique_ptr<raw::StructMember> Parser::ParseStructMember() {
     }
 
     return std::make_unique<raw::StructMember>(
-        scope.GetSourceElement(), std::move(type_ctor), std::move(identifier), std::move(maybe_default_value));
+        scope.GetSourceElement(),
+        std::move(attributes),
+        std::move(type_ctor),
+        std::move(identifier),
+        std::move(maybe_default_value));
 }
 
-std::unique_ptr<raw::StructDeclaration> Parser::ParseStructDeclaration(ASTScope& scope) {
+std::unique_ptr<raw::StructDeclaration>
+Parser::ParseStructDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope) {
     std::vector<std::unique_ptr<raw::StructMember>> members;
 
     ConsumeToken(IdentifierOfSubkind(Token::Subkind::kStruct));
@@ -324,7 +426,7 @@ std::unique_ptr<raw::StructDeclaration> Parser::ParseStructDeclaration(ASTScope&
         Fail();
 
     return std::make_unique<raw::StructDeclaration>(
-        scope.GetSourceElement(), std::move(identifier), std::move(members));
+        scope.GetSourceElement(), std::move(attributes), std::move(identifier), std::move(members));
 }
 
 std::unique_ptr<raw::File> Parser::ParseFile() {
@@ -332,6 +434,10 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
     std::vector<std::unique_ptr<raw::Using>> using_list;
     std::vector<std::unique_ptr<raw::ConstDeclaration>> const_declaration_list;
     std::vector<std::unique_ptr<raw::StructDeclaration>> struct_declaration_list;
+
+    auto attributes = MaybeParseAttributeList();
+    if (!Ok())
+        return Fail();
 
     ConsumeToken(IdentifierOfSubkind(Token::Subkind::kLibrary));
     if (!Ok())
@@ -368,18 +474,25 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
 
     auto parse_decl = [&using_list, &const_declaration_list, &struct_declaration_list, this]() {
         ASTScope scope(this);
+        std::unique_ptr<raw::AttributeList> attributes = MaybeParseAttributeList();
+        if (!Ok())
+            return More;
 
         switch (Peek().combined()) {
         default:
             return Done;
 
         case CASE_IDENTIFIER(Token::Subkind::kConst):
-            const_declaration_list.emplace_back(ParseConstDeclaration(scope));
+            const_declaration_list.emplace_back(ParseConstDeclaration(std::move(attributes), scope));
             return More;
         case CASE_IDENTIFIER(Token::Subkind::kStruct):
-            struct_declaration_list.emplace_back(ParseStructDeclaration(scope));
+            struct_declaration_list.emplace_back(ParseStructDeclaration(std::move(attributes), scope));
             return More;
         case CASE_IDENTIFIER(Token::Subkind::kUsing):
+            if (attributes != nullptr) {
+                Fail("Type alias cannot have attributes");
+                return More;
+            }
             using_list.emplace_back(ParseUsingAlias(scope));
             return More;
         }
@@ -400,6 +513,7 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
     return std::make_unique<raw::File>(
         scope.GetSourceElement(),
         end,
+        std::move(attributes),
         std::move(library_name),
         std::move(using_list),
         std::move(const_declaration_list),

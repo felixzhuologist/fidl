@@ -415,11 +415,12 @@ struct Decl {
         kStruct,
     };
 
-    Decl(Kind kind, Name name)
-        : kind(kind), name(std::move(name)) {}
+    Decl(Kind kind, std::unique_ptr<raw::AttributeList> attributes, Name name)
+        : kind(kind), attributes(std::move(attributes)), name(std::move(name)) {}
 
     const Kind kind;
 
+    std::unique_ptr<raw::AttributeList> attributes;
     const Name name;
 
     std::string GetName() const;
@@ -429,8 +430,8 @@ struct Decl {
 };
 
 struct TypeDecl : public Decl {
-    TypeDecl(Kind kind, Name name)
-        : Decl(kind, std::move(name)) {}
+    TypeDecl(Kind kind, std::unique_ptr<raw::AttributeList> attributes, Name name)
+        : Decl(kind, std::move(attributes), std::move(name)) {}
     TypeShape typeshape;
     bool recursive = false;
 };
@@ -606,9 +607,10 @@ struct TypeConstructor {
 
 struct Const : public Decl {
     Const(Name name,
+          std::unique_ptr<raw::AttributeList> attributes,
           std::unique_ptr<TypeConstructor> type_ctor,
           std::unique_ptr<Constant> value)
-        : Decl(Kind::kConst, std::move(name)), type_ctor(std::move(type_ctor)),
+        : Decl(Kind::kConst, std::move(attributes), std::move(name)), type_ctor(std::move(type_ctor)),
           value(std::move(value)) {}
     std::unique_ptr<TypeConstructor> type_ctor;
     std::unique_ptr<Constant> value;
@@ -616,10 +618,15 @@ struct Const : public Decl {
 
 struct Struct : public TypeDecl {
     struct Member {
-        Member(std::unique_ptr<TypeConstructor> type_ctor, SourceLocation name,
+        Member(std::unique_ptr<raw::AttributeList> attributes,
+               std::unique_ptr<TypeConstructor> type_ctor,
+               SourceLocation name,
                std::unique_ptr<Constant> maybe_default_value)
-            : type_ctor(std::move(type_ctor)), name(std::move(name)),
+            : attributes(std::move(attributes)),
+              type_ctor(std::move(type_ctor)),
+              name(std::move(name)),
               maybe_default_value(std::move(maybe_default_value)) {}
+        std::unique_ptr<raw::AttributeList> attributes;
         std::unique_ptr<TypeConstructor> type_ctor;
         SourceLocation name;
         std::unique_ptr<Constant> maybe_default_value;
@@ -627,8 +634,10 @@ struct Struct : public TypeDecl {
     };
 
     Struct(Name name,
-           std::vector<Member> members, bool anonymous = false)
-        : TypeDecl(Kind::kStruct, std::move(name)),
+           std::unique_ptr<raw::AttributeList> attributes,
+           std::vector<Member> members,
+           bool anonymous = false)
+        : TypeDecl(Kind::kStruct, std::move(attributes), std::move(name)),
           members(std::move(members)), anonymous(anonymous) {
     }
 
@@ -789,6 +798,9 @@ private:
     }
     bool Fail(const Decl& decl, StringView message) { return Fail(decl.name, message); }
 
+    // void ValidateAttributesPlacement(AttributeSchema::Placement placement,
+                                     // const raw::AttributeList* attributes);
+
     bool CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
                                    Name* out_name);
     void RegisterConst(Const* decl);
@@ -830,6 +842,8 @@ private:
     bool ResolveLiteralConstant(LiteralConstant* literal_constant, const Type* type);
 
     const PrimitiveType kSizeType = PrimitiveType(types::PrimitiveSubtype::kUint32);
+
+    std::unique_ptr<raw::AttributeList> attributes_;
 
     const Libraries* all_libraries_;
 

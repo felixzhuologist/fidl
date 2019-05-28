@@ -157,15 +157,22 @@ private:
 
     std::unique_ptr<raw::Constant> ParseConstant();
 
+    std::unique_ptr<raw::Attribute> ParseAttribute();
+    std::unique_ptr<raw::Attribute> ParseDocComment();
+    std::unique_ptr<raw::AttributeList> ParseAttributeList(std::unique_ptr<raw::Attribute>&& doc_comment, ASTScope& scope);
+    std::unique_ptr<raw::AttributeList> MaybeParseAttributeList();
+
     std::unique_ptr<raw::Using> ParseUsing();
     std::unique_ptr<raw::UsingAlias> ParseUsingAlias(ASTScope&);
 
     std::unique_ptr<raw::TypeConstructor> ParseTypeConstructor();
 
-    std::unique_ptr<raw::ConstDeclaration> ParseConstDeclaration(ASTScope&);
+    std::unique_ptr<raw::ConstDeclaration>
+    ParseConstDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
 
     std::unique_ptr<raw::StructMember> ParseStructMember();
-    std::unique_ptr<raw::StructDeclaration> ParseStructDeclaration(ASTScope&);
+    std::unique_ptr<raw::StructDeclaration>
+    ParseStructDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
 
     std::unique_ptr<raw::File> ParseFile();
 
