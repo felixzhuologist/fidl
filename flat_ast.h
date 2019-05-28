@@ -761,6 +761,10 @@ public:
     void ValidateValue(ErrorReporter* error_reporter,
                        const raw::Attribute* attribute) const;
 
+    void ValidateConstraint(ErrorReporter* error_reporter,
+                            const raw::Attribute* attribute,
+                            const Decl* decl) const;
+
 private:
     static bool NoOpConstraint(ErrorReporter* error_reporter,
                                const raw::Attribute* attribute,
@@ -902,6 +906,9 @@ private:
     bool ResolveConstant(Constant* constant, const Type* type);
     bool ResolveIdentifierConstant(IdentifierConstant* identifier_constant, const Type* type);
     bool ResolveLiteralConstant(LiteralConstant* literal_constant, const Type* type);
+
+    void ValidateAttributesConstraints(const Decl* decl, const raw::AttributeList* attributes);
+    bool VerifyDeclAttributes(Decl* decl);
 
     const PrimitiveType kSizeType = PrimitiveType(types::PrimitiveSubtype::kUint32);
 

@@ -469,6 +469,73 @@ void AttributeSchema::ValidateValue(ErrorReporter* error_reporter,
     error_reporter->ReportError(attribute->location(), message);
 }
 
+void AttributeSchema::ValidateConstraint(ErrorReporter* error_reporter,
+                                         const raw::Attribute* attribute,
+                                         const Decl* decl) const {
+    auto check = error_reporter->Checkpoint();
+    auto passed = constraint_(error_reporter, attribute, decl);
+    if (passed) {
+        assert(check.NoNewErrors() && "cannot add errors and pass");
+    } else if (check.NoNewErrors()) {
+        std::string message("declaration did not satisfy constraint of attribute '");
+        message.append(attribute->name);
+        message.append("' with value '");
+        message.append(attribute->value);
+        message.append("'");
+        error_reporter->ReportError(attribute->location(), message);
+    }
+}
+
+bool ParseBound(ErrorReporter* error_reporter, const SourceLocation& location,
+                const std::string& input, uint32_t* out_value) {
+    auto result = utils::ParseNumeric(input, out_value, 10);
+    switch (result) {
+    case utils::ParseNumericResult::kOutOfBounds:
+        error_reporter->ReportError(location, "bound is too big");
+        return false;
+    case utils::ParseNumericResult::kMalformed: {
+        std::string message("unable to parse bound '");
+        message.append(input);
+        message.append("'");
+        error_reporter->ReportError(location, message);
+        return false;
+    }
+    case utils::ParseNumericResult::kSuccess:
+        return true;
+    }
+}
+
+bool MaxBytesConstraint(ErrorReporter* error_reporter,
+                        const raw::Attribute* attribute,
+                        const Decl* decl) {
+    uint32_t bound;
+    if (!ParseBound(error_reporter, attribute->location(), attribute->value, &bound))
+        return false;
+
+    uint32_t max_bytes = std::numeric_limits<uint32_t>::max();
+    switch (decl->kind) {
+    case Decl::Kind::kStruct: {
+        auto struct_decl = static_cast<const Struct*>(decl);
+        max_bytes = struct_decl->typeshape.Size() + struct_decl->typeshape.MaxOutOfLine();
+        break;
+    }
+    default:
+        assert(false && "unexpected kind");
+        return false;
+    }
+    if (max_bytes > bound) {
+        std::ostringstream message;
+        message << "too large: only ";
+        message << bound;
+        message << " bytes allowed, but ";
+        message << max_bytes;
+        message << " bytes found";
+        error_reporter->ReportError(attribute->location(), message.str());
+        return false;
+    }
+    return true;
+}
+
 Libraries::Libraries() {
     AddAttributeSchema("Doc", AttributeSchema({
         /* any placement */
@@ -479,7 +546,8 @@ Libraries::Libraries() {
         AttributeSchema::Placement::kStructDecl,
     }, {
         /* any value */
-    }));
+    },
+    MaxBytesConstraint));
 }
 
 bool Libraries::Insert(std::unique_ptr<Library> library) {
@@ -582,6 +650,17 @@ void Library::ValidateAttributesPlacement(AttributeSchema::Placement placement,
             schema->ValidatePlacement(error_reporter_, attribute.get(), placement);
             schema->ValidateValue(error_reporter_, attribute.get());
         }
+    }
+}
+
+void Library::ValidateAttributesConstraints(const Decl* decl,
+                                            const raw::AttributeList* attributes) {
+    if (attributes == nullptr)
+        return;
+    for (const auto& attribute : attributes->attributes) {
+        auto schema = all_libraries_->RetrieveAttributeSchema(nullptr, attribute.get());
+        if (schema != nullptr)
+            schema->ValidateConstraint(error_reporter_, attribute.get(), decl);
     }
 }
 
@@ -1406,6 +1485,34 @@ bool Library::CompileDecl(Decl* decl) {
     return true;
 }
 
+bool Library::VerifyDeclAttributes(Decl* decl) {
+    assert(decl->compiled && "verification must happen after compilation of decls");
+    auto placement_ok = error_reporter_->Checkpoint();
+    switch(decl->kind) {
+    case Decl::Kind::kConst: {
+        auto const_decl = static_cast<Const*>(decl);
+        ValidateAttributesPlacement(
+            AttributeSchema::Placement::kConstDecl, const_decl->attributes.get());
+        break;
+    }
+    case Decl::Kind::kStruct: {
+        auto struct_decl = static_cast<Struct*>(decl);
+        ValidateAttributesPlacement(
+            AttributeSchema::Placement::kStructDecl, struct_decl->attributes.get());
+        for (const auto& member : struct_decl->members) {
+            ValidateAttributesPlacement(
+                AttributeSchema::Placement::kStructMember,
+                member.attributes.get());
+        }
+        if (placement_ok.NoNewErrors()) {
+            ValidateAttributesConstraints(
+                struct_decl, struct_decl->attributes.get());
+        }
+    }
+    } // switch
+    return true;
+}
+
 bool Library::CompileConst(Const* const_declaration) {
     TypeShape typeshape;
     if (!CompileTypeConstructor(const_declaration->type_ctor.get(), &typeshape))
@@ -1502,6 +1609,11 @@ bool Library::Compile() {
 
     for (Decl* decl : declaration_order_) {
         if (!CompileDecl(decl))
+            return false;
+    }
+
+    for (Decl* decl : declaration_order_) {
+        if (!VerifyDeclAttributes(decl))
             return false;
     }
 
