@@ -90,6 +90,52 @@ void ConstDeclaration::Accept(TreeVisitor& visitor) {
     visitor.OnConstant(constant);
 }
 
+void BitsMember::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
+    visitor.OnIdentifier(identifier);
+    visitor.OnConstant(value);
+}
+
+void BitsDeclaration::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
+    visitor.OnIdentifier(identifier);
+    if (maybe_type_ctor != nullptr) {
+        visitor.OnTypeConstructor(maybe_type_ctor);
+    }
+    for (auto member = members.begin(); member != members.end(); ++member) {
+        visitor.OnBitsMember(*member);
+    }
+}
+
+void EnumMember::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
+    visitor.OnIdentifier(identifier);
+    visitor.OnConstant(value);
+}
+
+void EnumDeclaration::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
+    visitor.OnIdentifier(identifier);
+    if (maybe_type_ctor != nullptr) {
+        visitor.OnTypeConstructor(maybe_type_ctor);
+    }
+    for (auto& member : members) {
+        visitor.OnEnumMember(member);
+    }
+}
+
 void StructMember::Accept(TreeVisitor& visitor) {
     SourceElementMark sem(visitor, *this);
     if (attributes != nullptr) {
@@ -113,6 +159,49 @@ void StructDeclaration::Accept(TreeVisitor& visitor) {
     }
 }
 
+void UnionMember::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
+    visitor.OnTypeConstructor(type_ctor);
+    visitor.OnIdentifier(identifier);
+}
+
+void UnionDeclaration::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
+    visitor.OnIdentifier(identifier);
+    for (auto member = members.begin();
+         member != members.end();
+         ++member) {
+        visitor.OnUnionMember(*member);
+    }
+}
+
+void XUnionMember::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
+
+    visitor.OnTypeConstructor(type_ctor);
+    visitor.OnIdentifier(identifier);
+}
+
+void XUnionDeclaration::Accept(TreeVisitor& visitor) {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor.OnAttributeList(attributes);
+    }
+    visitor.OnIdentifier(identifier);
+    for (auto& member : members) {
+        visitor.OnXUnionMember(member);
+    }
+}
+
 void File::Accept(TreeVisitor& visitor) {
     SourceElementMark sem(visitor, *this);
     if (attributes != nullptr) {
@@ -127,8 +216,20 @@ void File::Accept(TreeVisitor& visitor) {
     for (auto& i : const_declaration_list) {
         visitor.OnConstDeclaration(i);
     }
+    for (auto& i : bits_declaration_list) {
+        visitor.OnBitsDeclaration(i);
+    }
+    for (auto& i : enum_declaration_list) {
+        visitor.OnEnumDeclaration(i);
+    }
     for (auto& i : struct_declaration_list) {
         visitor.OnStructDeclaration(i);
+    }
+    for (auto& i : union_declaration_list) {
+        visitor.OnUnionDeclaration(i);
+    }
+    for (auto& i : xunion_declaration_list) {
+        visitor.OnXUnionDeclaration(i);
     }
 }
 

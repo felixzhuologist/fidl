@@ -130,11 +130,43 @@ public:
         element->Accept(*this);
     }
 
+    virtual void OnBitsMember(std::unique_ptr<BitsMember> const& element) {
+        element->Accept(*this);
+    }
+    
+    virtual void OnBitsDeclaration(std::unique_ptr<BitsDeclaration> const& element) {
+        element->Accept(*this);
+    }
+
+    virtual void OnEnumMember(std::unique_ptr<EnumMember> const& element) {
+        element->Accept(*this);
+    }
+
+    virtual void OnEnumDeclaration(std::unique_ptr<EnumDeclaration> const& element) {
+        element->Accept(*this);
+    }
+
     virtual void OnStructMember(std::unique_ptr<StructMember> const& element) {
         element->Accept(*this);
     }
 
     virtual void OnStructDeclaration(std::unique_ptr<StructDeclaration> const& element) {
+        element->Accept(*this);
+    }
+
+    virtual void OnUnionMember(std::unique_ptr<UnionMember> const& element) {
+        element->Accept(*this);
+    }
+
+    virtual void OnUnionDeclaration(std::unique_ptr<UnionDeclaration> const& element) {
+        element->Accept(*this);
+    }
+
+    virtual void OnXUnionMember(std::unique_ptr<XUnionMember> const& element) {
+        element->Accept(*this);
+    }
+
+    virtual void OnXUnionDeclaration(std::unique_ptr<XUnionDeclaration> const& element) {
         element->Accept(*this);
     }
 

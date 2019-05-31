@@ -176,6 +176,9 @@ generally correponding to the AST nodes (e.g. `CompileStruct`, `CompileConst`), 
   - for [`Const`s](#decl), to resolve their value, and
   - for`TypeConstructor`s, to set their [`Type`](#type).
 
+The compilation process does other things like validate the library name and
+do attribute checking.
+
 TODO: go through some compilation examples of the above
 
 Once this step is complete, the `flat::Library` contains all the necessary information

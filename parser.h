@@ -167,13 +167,28 @@ private:
 
     std::unique_ptr<raw::TypeConstructor> ParseTypeConstructor();
 
+    std::unique_ptr<raw::BitsMember> ParseBitsMember();
+    std::unique_ptr<raw::BitsDeclaration>
+    ParseBitsDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
+
     std::unique_ptr<raw::ConstDeclaration>
     ParseConstDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
+
+    std::unique_ptr<raw::EnumMember> ParseEnumMember();
+    std::unique_ptr<raw::EnumDeclaration>
+    ParseEnumDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
 
     std::unique_ptr<raw::StructMember> ParseStructMember();
     std::unique_ptr<raw::StructDeclaration>
     ParseStructDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
 
+    std::unique_ptr<raw::UnionMember> ParseUnionMember();
+    std::unique_ptr<raw::UnionDeclaration>
+    ParseUnionDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
+
+    std::unique_ptr<raw::XUnionMember> ParseXUnionMember();
+    std::unique_ptr<raw::XUnionDeclaration>
+    ParseXUnionDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
     std::unique_ptr<raw::File> ParseFile();
 
     Lexer* lexer_;
