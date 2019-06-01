@@ -708,7 +708,10 @@ bool Library::RegisterDecl(Decl* decl) {
         message.append(name->name_part());
         return Fail(*name, message);
     }
+
     switch (decl->kind) {
+    case Decl::Kind::kBits:
+    case Decl::Kind::kEnum:
     case Decl::Kind::kStruct: {
         auto type_decl = static_cast<TypeDecl*>(decl);
         auto type_template = std::make_unique<TypeDeclTypeTemplate>(
@@ -723,7 +726,7 @@ bool Library::RegisterDecl(Decl* decl) {
     return true;
 }
 
-bool Library::ConsumeConstant(std::unique_ptr<raw::Constant> raw_constant, SourceLocation location,
+bool Library::ConsumeConstant(std::unique_ptr<raw::Constant> raw_constant,
                               std::unique_ptr<Constant>* out_constant) {
     switch (raw_constant->kind) {
     case raw::Constant::Kind::kIdentifier: {
@@ -744,7 +747,6 @@ bool Library::ConsumeConstant(std::unique_ptr<raw::Constant> raw_constant, Sourc
 }
 
 bool Library::ConsumeTypeConstructor(std::unique_ptr<raw::TypeConstructor> raw_type_ctor,
-                                     SourceLocation location,
                                      std::unique_ptr<TypeConstructor>* out_type_ctor) {
     Name name;
     if (!CompileCompoundIdentifier(raw_type_ctor->identifier.get(), &name))
@@ -752,13 +754,13 @@ bool Library::ConsumeTypeConstructor(std::unique_ptr<raw::TypeConstructor> raw_t
 
     std::unique_ptr<TypeConstructor> maybe_arg_type_ctor;
     if (raw_type_ctor->maybe_arg_type_ctor != nullptr) {
-        if (!ConsumeTypeConstructor(std::move(raw_type_ctor->maybe_arg_type_ctor), location, &maybe_arg_type_ctor))
+        if (!ConsumeTypeConstructor(std::move(raw_type_ctor->maybe_arg_type_ctor), &maybe_arg_type_ctor))
             return false;
     }
 
     std::unique_ptr<Constant> maybe_size;
     if (raw_type_ctor->maybe_size != nullptr) {
-        if (!ConsumeConstant(std::move(raw_type_ctor->maybe_size), location, &maybe_size))
+        if (!ConsumeConstant(std::move(raw_type_ctor->maybe_size), &maybe_size))
             return false;
     }
 
@@ -815,7 +817,7 @@ bool Library::ConsumeTypeAlias(raw::UsingAlias* using_alias) {
     auto location = using_alias->alias->location();
     auto alias_name = Name(this, location);
     std::unique_ptr<TypeConstructor> partial_type_ctor_;
-    if (!ConsumeTypeConstructor(std::move(using_alias->type_ctor), location, &partial_type_ctor_))
+    if (!ConsumeTypeConstructor(std::move(using_alias->type_ctor), &partial_type_ctor_))
         return false;
     typespace_->AddTemplate(std::make_unique<TypeAliasTypeTemplate>(
         std::move(alias_name), typespace_, error_reporter_, this, std::move(partial_type_ctor_)));
@@ -827,11 +829,11 @@ bool Library::ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> con
     auto name = Name(this, location);
 
     std::unique_ptr<TypeConstructor> type_ctor;
-    if (!ConsumeTypeConstructor(std::move(const_declaration->type_ctor), location, &type_ctor))
+    if (!ConsumeTypeConstructor(std::move(const_declaration->type_ctor), &type_ctor))
         return false;
 
     std::unique_ptr<Constant> constant;
-    if (!ConsumeConstant(std::move(const_declaration->constant), location, &constant))
+    if (!ConsumeConstant(std::move(const_declaration->constant), &constant))
         return false;
 
     const_declarations_.push_back(std::make_unique<Const>(
@@ -842,18 +844,78 @@ bool Library::ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> con
     return RegisterDecl(decl);
 } 
 
-bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration) {
-    auto name = Name(this, struct_declaration->identifier->location());
+bool Library::ConsumeBitsDeclaration(std::unique_ptr<raw::BitsDeclaration> bits_declaration) {
+    std::vector<Bits::Member> members;
+    for (auto& member : bits_declaration->members) {
+        std::unique_ptr<Constant> value;
+        if (!ConsumeConstant(std::move(member->value), &value))
+            return false;
+        auto location = member->identifier->location();
+        members.emplace_back(std::move(member->attributes), location, std::move(value));
+    }
 
+    std::unique_ptr<TypeConstructor> type_ctor;
+    if (bits_declaration->maybe_type_ctor) {
+        if (!ConsumeTypeConstructor(std::move(bits_declaration->maybe_type_ctor), &type_ctor))
+            return false;
+    } else {
+        type_ctor = std::make_unique<TypeConstructor>(
+            Name(nullptr, "uint32"),
+            nullptr /* maybe_arg_type */,
+            nullptr /* maybe_size */,
+            types::Nullability::kNonnullable);
+    }
+
+    bits_declarations_.push_back(
+        std::make_unique<Bits>(
+            std::move(bits_declaration->attributes),
+            Name(this, bits_declaration->identifier->location()),
+            std::move(type_ctor),
+            std::move(members)));
+    return RegisterDecl(bits_declarations_.back().get());
+}
+
+bool Library::ConsumeEnumDeclaration(std::unique_ptr<raw::EnumDeclaration> enum_declaration) {
+    std::vector<Enum::Member> members;
+    for (auto& member : enum_declaration->members) {
+        std::unique_ptr<Constant> value;
+        if (!ConsumeConstant(std::move(member->value), &value))
+            return false;
+        auto location = member->identifier->location();
+        members.emplace_back(std::move(member->attributes), location, std::move(value));
+    }
+
+    std::unique_ptr<TypeConstructor> type_ctor;
+    if (enum_declaration->maybe_type_ctor) {
+        if (!ConsumeTypeConstructor(std::move(enum_declaration->maybe_type_ctor), &type_ctor))
+            return false;
+    } else {
+        type_ctor = std::make_unique<TypeConstructor>(
+            Name(nullptr, "uint32"),
+            nullptr /* maybe_arg_type */,
+            nullptr /* maybe_size */,
+            types::Nullability::kNonnullable);
+    }
+
+    enum_declarations_.push_back(
+        std::make_unique<Enum>(
+            std::move(enum_declaration->attributes),
+            Name(this, enum_declaration->identifier->location()),
+            std::move(type_ctor),
+            std::move(members)));
+    return RegisterDecl(enum_declarations_.back().get());
+}
+
+bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration) {
     std::vector<Struct::Member> members;
     for (auto& member : struct_declaration->members) {
         std::unique_ptr<TypeConstructor> type_ctor;
         auto location = member->identifier->location();
-        if (!ConsumeTypeConstructor(std::move(member->type_ctor), location, &type_ctor))
+        if (!ConsumeTypeConstructor(std::move(member->type_ctor), &type_ctor))
             return false;
         std::unique_ptr<Constant> maybe_default_value;
         if (member->maybe_default_value != nullptr) {
-            if (!ConsumeConstant(std::move(member->maybe_default_value), location, &maybe_default_value))
+            if (!ConsumeConstant(std::move(member->maybe_default_value), &maybe_default_value))
                 return false;
         }
         members.emplace_back(
@@ -863,6 +925,7 @@ bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> s
             std::move(maybe_default_value));
     }
 
+    auto name = Name(this, struct_declaration->identifier->location());
     struct_declarations_.push_back(
         std::make_unique<Struct>(
             std::move(name),
@@ -914,6 +977,20 @@ bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
     auto const_declaration_list = std::move(file->const_declaration_list);
     for (auto& const_declaration : const_declaration_list) {
         if (!ConsumeConstDeclaration(std::move(const_declaration))) {
+            return false;
+        }
+    }
+
+    auto bits_declaration_list = std::move(file->bits_declaration_list);
+    for (auto& bits_declaration : bits_declaration_list) {
+        if (!ConsumeBitsDeclaration(std::move(bits_declaration))) {
+            return false;
+        }
+    }
+
+    auto enum_declaration_list = std::move(file->enum_declaration_list);
+    for (auto& enum_declaration : enum_declaration_list) {
+        if (!ConsumeEnumDeclaration(std::move(enum_declaration))) {
             return false;
         }
     }
@@ -1317,6 +1394,21 @@ bool Library::DeclDependencies(Decl* decl, std::set<Decl*>* out_edges) {
             return false;
         break;
     }
+    case Decl::Kind::kBits: {
+        auto bits_decl = static_cast<const Bits*>(decl);
+        for (const auto& member : bits_decl->members) {
+            // why don't we check for failure here?
+            maybe_add_constant(bits_decl->subtype_ctor.get(), member.value.get());
+        }
+        break;
+    }
+    case Decl::Kind::kEnum: {
+        auto enum_decl = static_cast<const Enum*>(decl);
+        for (const auto& member : enum_decl->members) {
+            maybe_add_constant(enum_decl->subtype_ctor.get(), member.value.get());
+        }
+        break;
+    }
     case Decl::Kind::kStruct: {
         auto struct_decl = static_cast<const Struct*>(decl);
         for (const auto& member : struct_decl->members) {
@@ -1475,6 +1567,18 @@ bool Library::CompileDecl(Decl* decl) {
             return false;
         break;
     }
+    case Decl::Kind::kBits: {
+        auto bits_decl = static_cast<Bits*>(decl);
+        if (!CompileBits(bits_decl))
+            return false;
+        break;
+    }
+    case Decl::Kind::kEnum: {
+        auto enum_decl = static_cast<Enum*>(decl);
+        if (!CompileEnum(enum_decl))
+            return false;
+        break;
+    }
     case Decl::Kind::kStruct: {
         auto struct_decl = static_cast<Struct*>(decl);
         if (!CompileStruct(struct_decl))
@@ -1493,6 +1597,38 @@ bool Library::VerifyDeclAttributes(Decl* decl) {
         auto const_decl = static_cast<Const*>(decl);
         ValidateAttributesPlacement(
             AttributeSchema::Placement::kConstDecl, const_decl->attributes.get());
+        break;
+    }
+    case Decl::Kind::kBits: {
+        auto bits_declaration = static_cast<Bits*>(decl);
+        ValidateAttributesPlacement(
+            AttributeSchema::Placement::kBitsDecl,
+            bits_declaration->attributes.get());
+        for (const auto& member : bits_declaration->members) {
+            ValidateAttributesPlacement(
+                AttributeSchema::Placement::kBitsMember,
+                member.attributes.get());
+        }
+        if (placement_ok.NoNewErrors()) {
+            ValidateAttributesConstraints(
+                bits_declaration, bits_declaration->attributes.get());
+        }
+        break;
+    }
+    case Decl::Kind::kEnum: {
+        auto enum_declaration = static_cast<Enum*>(decl);
+        ValidateAttributesPlacement(
+            AttributeSchema::Placement::kEnumDecl,
+            enum_declaration->attributes.get());
+        for (const auto& member : enum_declaration->members) {
+            ValidateAttributesPlacement(
+                AttributeSchema::Placement::kEnumMember,
+                member.attributes.get());
+        }
+        if (placement_ok.NoNewErrors()) {
+            ValidateAttributesConstraints(
+                enum_declaration, enum_declaration->attributes.get());
+        }
         break;
     }
     case Decl::Kind::kStruct: {
@@ -1526,6 +1662,118 @@ bool Library::CompileConst(Const* const_declaration) {
     }
     if (!ResolveConstant(const_declaration->value.get(), const_type))
         return Fail(*const_declaration, "unable to resolve constant value");
+
+    return true;
+}
+
+bool Library::CompileBits(Bits* bits_declaration) {
+    if (!CompileTypeConstructor(bits_declaration->subtype_ctor.get(), &bits_declaration->typeshape))
+        return false;
+
+    if (bits_declaration->subtype_ctor->type->kind != Type::Kind::kPrimitive) {
+        std::string message("bits may only be of unsigned integral primitive type, found ");
+        message.append(NameFlatType(bits_declaration->subtype_ctor->type));
+        return Fail(*bits_declaration, message);
+    }
+
+    auto primitive_type = static_cast<const PrimitiveType*>(bits_declaration->subtype_ctor->type);
+    switch (primitive_type->subtype) {
+    case types::PrimitiveSubtype::kUint8: {
+        uint8_t mask;
+        if (!ValidateBitsMembersAndCalcMask<uint8_t>(bits_declaration, &mask))
+            return false;
+        bits_declaration->mask = mask;
+        break;
+    }
+    case types::PrimitiveSubtype::kUint16: {
+        uint16_t mask;
+        if (!ValidateBitsMembersAndCalcMask<uint16_t>(bits_declaration, &mask))
+            return false;
+        bits_declaration->mask = mask;
+        break;
+    }
+    case types::PrimitiveSubtype::kUint32: {
+        uint32_t mask;
+        if (!ValidateBitsMembersAndCalcMask<uint32_t>(bits_declaration, &mask))
+            return false;
+        bits_declaration->mask = mask;
+        break;
+    }
+    case types::PrimitiveSubtype::kUint64: {
+        uint64_t mask;
+        if (!ValidateBitsMembersAndCalcMask<uint64_t>(bits_declaration, &mask))
+            return false;
+        bits_declaration->mask = mask;
+        break;
+    }
+    case types::PrimitiveSubtype::kBool:
+    case types::PrimitiveSubtype::kInt8:
+    case types::PrimitiveSubtype::kInt16:
+    case types::PrimitiveSubtype::kInt32:
+    case types::PrimitiveSubtype::kInt64:
+    case types::PrimitiveSubtype::kFloat32:
+    case types::PrimitiveSubtype::kFloat64:
+        std::string message("bits may only be of unsigned integral primitive type, found ");
+        message.append(NameFlatType(bits_declaration->subtype_ctor->type));
+        return Fail(*bits_declaration, message);
+    }
+
+    return true;
+}
+
+bool Library::CompileEnum(Enum* enum_declaration) {
+    if (!CompileTypeConstructor(enum_declaration->subtype_ctor.get(), &enum_declaration->typeshape))
+        return false;
+
+    if (enum_declaration->subtype_ctor->type->kind != Type::Kind::kPrimitive) {
+        std::string message("enums may only be of integral primitive type, found ");
+        message.append(NameFlatType(enum_declaration->subtype_ctor->type));
+        return Fail(*enum_declaration, message);
+    }
+
+    // Validate constants.
+    auto primitive_type = static_cast<const PrimitiveType*>(enum_declaration->subtype_ctor->type);
+    enum_declaration->type = primitive_type;
+    switch (primitive_type->subtype) {
+    case types::PrimitiveSubtype::kInt8:
+        if (!ValidateBitsOrEnumMembers<Enum, int8_t>(enum_declaration))
+            return false;
+        break;
+    case types::PrimitiveSubtype::kInt16:
+        if (!ValidateBitsOrEnumMembers<Enum, int16_t>(enum_declaration))
+            return false;
+        break;
+    case types::PrimitiveSubtype::kInt32:
+        if (!ValidateBitsOrEnumMembers<Enum, int32_t>(enum_declaration))
+            return false;
+        break;
+    case types::PrimitiveSubtype::kInt64:
+        if (!ValidateBitsOrEnumMembers<Enum, int64_t>(enum_declaration))
+            return false;
+        break;
+    case types::PrimitiveSubtype::kUint8:
+        if (!ValidateBitsOrEnumMembers<Enum, uint8_t>(enum_declaration))
+            return false;
+        break;
+    case types::PrimitiveSubtype::kUint16:
+        if (!ValidateBitsOrEnumMembers<Enum, uint16_t>(enum_declaration))
+            return false;
+        break;
+    case types::PrimitiveSubtype::kUint32:
+        if (!ValidateBitsOrEnumMembers<Enum, uint32_t>(enum_declaration))
+            return false;
+        break;
+    case types::PrimitiveSubtype::kUint64:
+        if (!ValidateBitsOrEnumMembers<Enum, uint64_t>(enum_declaration))
+            return false;
+        break;
+    case types::PrimitiveSubtype::kBool:
+    case types::PrimitiveSubtype::kFloat32:
+    case types::PrimitiveSubtype::kFloat64:
+        std::string message("enums may only be of integral primitive type, found ");
+        message.append(NameFlatType(enum_declaration->subtype_ctor->type));
+        return Fail(*enum_declaration, message);
+    }
 
     return true;
 }
@@ -1594,6 +1842,87 @@ bool Library::CompileTypeConstructor(TypeConstructor* type_ctor, TypeShape* out_
     if (out_typeshape)
         *out_typeshape = type_ctor->type->shape;
     return true;
+}
+
+template <typename DeclType, typename MemberType>
+bool Library::ValidateBitsOrEnumMembers(DeclType* decl) {
+    assert(decl != nullptr);
+
+    constexpr const char* decl_type = std::is_same_v<DeclType, Enum> ? "enum" : "bits";
+
+    Scope<std::string> name_scope;
+    Scope<MemberType> value_scope;
+    bool success = true;
+    for (auto& member : decl->members) {
+        assert(member.value != nullptr && "Compiler bug: member value is null!");
+
+        if (!ResolveConstant(member.value.get(), decl->subtype_ctor->type)) {
+            std::string failure_message = "unable to resolve ";
+            failure_message += decl_type;
+            failure_message += " member";
+            return Fail(member.name, failure_message);
+        }
+
+        std::string name = NameIdentifier(member.name);
+        auto name_result = name_scope.Insert(name, member.name);
+        if (!name_result.ok()) {
+            std::ostringstream msg_stream;
+            msg_stream << "name of member " << name;
+            msg_stream << " conflicts with previously declared member in the ";
+            msg_stream << decl_type << " " << decl->GetName();
+
+            // We can log the error and then continue validating for other issues in the decl
+            success = Fail(member.name, msg_stream.str());
+        }
+
+        MemberType value = static_cast<const NumericConstantValue<MemberType>&>(member.value->Value()).value;
+        auto value_result = value_scope.Insert(value, member.name);
+        if (!value_result.ok()) {
+            std::ostringstream msg_stream;
+            msg_stream << "value of member " << name;
+            msg_stream << " conflicts with previously declared member ";
+            msg_stream << NameIdentifier(value_result.previous_occurrence()) << " in the ";
+            msg_stream << decl_type << " " << decl->GetName();
+
+            // We can log the error and then continue validating other members for other bugs
+            success = Fail(member.name, msg_stream.str());
+        }
+    }
+
+    return success;
+}
+
+template <typename T>
+static bool IsPowerOfTwo(T t) {
+    if (t == 0) {
+        return false;
+    }
+    if ((t & (t - 1)) != 0) {
+        return false;
+    }
+    return true;
+}
+
+template <typename MemberType>
+bool Library::ValidateBitsMembersAndCalcMask(Bits* bits_decl, MemberType* out_mask) {
+    static_assert(std::is_unsigned<MemberType>::value && !std::is_same<MemberType, bool>::value,
+                  "Bits members must be an unsigned integral type!");
+
+    if (!ValidateBitsOrEnumMembers<Bits, MemberType>(bits_decl))
+        return false;
+
+    MemberType mask = 0u;
+    bool success = true;
+    for (auto& member : bits_decl->members) {
+        MemberType value = static_cast<const NumericConstantValue<MemberType>&>(member.value->Value()).value;
+        if (!IsPowerOfTwo(value)) {
+            Fail(member.name, "bits members must be powers of two");
+            success = false;
+        }
+        mask |= value;
+    }
+    *out_mask = mask;
+    return success;
 }
 
 bool Library::Compile() {

@@ -412,6 +412,8 @@ struct Decl {
 
     enum class Kind {
         kConst,
+        kBits,
+        kEnum,
         kStruct,
     };
 
@@ -616,6 +618,63 @@ struct Const : public Decl {
     std::unique_ptr<Constant> value;
 };
 
+struct Bits : public TypeDecl {
+    struct Member {
+        Member(std::unique_ptr<raw::AttributeList> attributes,
+               SourceLocation name,
+               std::unique_ptr<Constant> value)
+            : attributes(std::move(attributes)), name(name), value(std::move(value)) {}
+
+        std::unique_ptr<raw::AttributeList> attributes;
+        SourceLocation name;
+        std::unique_ptr<Constant> value;
+    };
+
+    Bits(std::unique_ptr<raw::AttributeList> attributes,
+         Name name,
+         std::unique_ptr<TypeConstructor> subtype_ctor,
+         std::vector<Member> members)
+        : TypeDecl(Kind::kBits, std::move(attributes), std::move(name)),
+          subtype_ctor(std::move(subtype_ctor)),
+          members(std::move(members)) {}
+
+    std::unique_ptr<TypeConstructor> subtype_ctor;
+    std::vector<Member> members;
+
+    // set during compilation
+    uint64_t mask = 0;
+};
+
+struct Enum : public TypeDecl {
+    struct Member {
+        Member(std::unique_ptr<raw::AttributeList> attributes,
+               SourceLocation name,
+               std::unique_ptr<Constant> value)
+            : attributes(std::move(attributes)), 
+              name(name),
+              value(std::move(value)) {}
+
+        std::unique_ptr<raw::AttributeList> attributes;
+        SourceLocation name;
+        std::unique_ptr<Constant> value;
+    };
+
+    Enum(std::unique_ptr<raw::AttributeList> attributes,
+         Name name,
+         std::unique_ptr<TypeConstructor> subtype_ctor,
+         std::vector<Member> members)
+        : TypeDecl(Kind::kEnum, std::move(attributes), std::move(name)),
+          subtype_ctor(std::move(subtype_ctor)),
+          members(std::move(members)) {}
+
+    // Set during construction.
+    std::unique_ptr<TypeConstructor> subtype_ctor;
+    std::vector<Member> members;
+
+    // Set during compilation.
+    const PrimitiveType* type = nullptr;
+};
+
 struct Struct : public TypeDecl {
     struct Member {
         Member(std::unique_ptr<raw::AttributeList> attributes,
@@ -739,8 +798,12 @@ public:
                                           const Decl* decl)>;
 
     enum class Placement {
-        kConstDecl,
         kLibrary,
+        kConstDecl,
+        kBitsDecl,
+        kBitsMember,
+        kEnumDecl,
+        kEnumMember,
         kStructDecl,
         kStructMember,
     };
@@ -849,6 +912,8 @@ public:
     std::vector<Decl*> declaration_order_;
     
     std::vector<std::unique_ptr<Const>> const_declarations_;
+    std::vector<std::unique_ptr<Bits>> bits_declarations_;
+    std::vector<std::unique_ptr<Enum>> enum_declarations_;
     std::vector<std::unique_ptr<Struct>> struct_declarations_;
 
 private:
@@ -872,10 +937,9 @@ private:
     void RegisterConst(Const* decl);
     bool RegisterDecl(Decl* decl);
 
-    bool ConsumeConstant(std::unique_ptr<raw::Constant> raw_constant, SourceLocation location,
+    bool ConsumeConstant(std::unique_ptr<raw::Constant> raw_constant,
                          std::unique_ptr<Constant>* out_constant);
     bool ConsumeTypeConstructor(std::unique_ptr<raw::TypeConstructor> raw_type_ctor,
-                                SourceLocation location,
                                 std::unique_ptr<TypeConstructor>* out_type);
 
     bool ConsumeUsing(std::unique_ptr<raw::Using> using_directive);
@@ -883,6 +947,8 @@ private:
     bool ConsumeTypeAlias(raw::UsingAlias* using_alias);
 
     bool ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> const_declaration);
+    bool ConsumeBitsDeclaration(std::unique_ptr<raw::BitsDeclaration> bits_declaration);
+    bool ConsumeEnumDeclaration(std::unique_ptr<raw::EnumDeclaration> enum_declaration);
     bool ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration);
 
     bool TypeCanBeConst(const Type* type);
@@ -899,6 +965,8 @@ private:
     bool CompileLibraryName();
 
     bool CompileConst(Const* const_declaration);
+    bool CompileBits(Bits* bits_declaration);
+    bool CompileEnum(Enum* enum_declaration);
     bool CompileStruct(Struct* struct_declaration);
 
     bool CompileTypeConstructor(TypeConstructor* type, TypeShape* out_type_metadata);
@@ -906,6 +974,14 @@ private:
     bool ResolveConstant(Constant* constant, const Type* type);
     bool ResolveIdentifierConstant(IdentifierConstant* identifier_constant, const Type* type);
     bool ResolveLiteralConstant(LiteralConstant* literal_constant, const Type* type);
+
+    // compiles the member values, then checks that both the member names and
+    // values are unique
+    template <typename DeclType, typename MemberType>
+    bool ValidateBitsOrEnumMembers(DeclType* decl);
+    // also checks that the values are powers of 2 only, then calculates the mask
+    template <typename MemberType>
+    bool ValidateBitsMembersAndCalcMask(Bits* bits_decl, MemberType* out_mask);
 
     void ValidateAttributesConstraints(const Decl* decl, const raw::AttributeList* attributes);
     bool VerifyDeclAttributes(Decl* decl);
