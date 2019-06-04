@@ -1328,11 +1328,25 @@ bool Library::TypeIsConvertibleTo(const Type* from_type, const Type* to_type) {
 Decl* Library::LookupConstant(const TypeConstructor* type_ctor, const Name& name) {
     auto decl = LookupDeclByName(type_ctor->name);
     if (decl == nullptr) {
+        // the constant is not of a user defined type, which means that it must
+        // be declared as a top level const since those can only  have a type
+        // of string or primitive type
         auto iter = constants_.find(&name);
         if (iter == constants_.end()) {
             return nullptr;
         }
         return iter->second;
+    }
+
+    // otherwise, the only user defined type that constants can be is of an enum
+    if (decl->kind != Decl::Kind::kEnum)
+        return nullptr;
+
+    auto enum_decl = static_cast<Enum*>(decl);
+    for (auto& member : enum_decl->members) {
+        if (member.name.data() == name.name_part()) {
+            return enum_decl;
+        }
     }
 
     return nullptr;
