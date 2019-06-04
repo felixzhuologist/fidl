@@ -23,7 +23,7 @@ uint32_t AlignTo(uint64_t size, uint64_t alignment) {
                  static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
 }
 
-uint32_t ClampedMultipy(uint32_t a, uint32_t b) {
+uint32_t ClampedMultiply(uint32_t a, uint32_t b) {
     return static_cast<uint32_t>(
         std::min(static_cast<uint64_t>(a) * static_cast<uint64_t>(b),
                  static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
@@ -76,11 +76,11 @@ TypeShape PointerTypeShape(const TypeShape& element, uint32_t max_element_count 
     if (element.Size() > 0 && element.Depth() < std::numeric_limits<uint32_t>::max())
         depth = ClampedAdd(element.Depth(), 1);
 
-    uint32_t elements_size = ClampedMultipy(element.Size(), max_element_count);
+    uint32_t elements_size = ClampedMultiply(element.Size(), max_element_count);
     // out of line data is aligned to 8 bytes
     elements_size = AlignTo(elements_size, 8);
     // elements may carry their own out of line dat
-    uint32_t elements_out_of_line = ClampedMultipy(element.MaxOutOfLine(), max_element_count);
+    uint32_t elements_out_of_line = ClampedMultiply(element.MaxOutOfLine(), max_element_count);
     uint32_t max_out_of_line = ClampedAdd(elements_size, elements_out_of_line);
 
     uint32_t max_handles = ClampedAdd(element.MaxHandles(), max_element_count);
@@ -89,11 +89,11 @@ TypeShape PointerTypeShape(const TypeShape& element, uint32_t max_element_count 
 }
 
 TypeShape ArrayType::Shape(TypeShape element, uint32_t count) {
-    return TypeShape(ClampedMultipy(element.Size(), count),
+    return TypeShape(ClampedMultiply(element.Size(), count),
                      element.Alignment(),
                      element.Depth(),
-                     ClampedMultipy(element.MaxHandles(), count),
-                     ClampedMultipy(element.MaxOutOfLine(), count));
+                     ClampedMultiply(element.MaxHandles(), count),
+                     ClampedMultiply(element.MaxOutOfLine(), count));
 }
 
 TypeShape VectorType::Shape(TypeShape element, uint32_t max_element_count) {
