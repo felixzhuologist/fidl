@@ -41,6 +41,7 @@ TypeShape Struct::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles
     uint32_t depth = 0u;
     uint32_t max_handles = 0u;
     uint32_t max_out_of_line = 0u;
+    bool has_padding = false;
 
     for (FieldShape* field : *fields) {
         TypeShape typeshape = field->Typeshape();
@@ -51,6 +52,7 @@ TypeShape Struct::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles
         depth = std::max(depth, field->Depth());
         max_handles = ClampedAdd(max_handles, typeshape.MaxHandles());
         max_out_of_line = ClampedAdd(max_out_of_line, typeshape.MaxOutOfLine());
+        has_padding |= typeshape.HasPadding();
     }
 
     max_handles = ClampedAdd(max_handles, extra_handles);
@@ -65,7 +67,19 @@ TypeShape Struct::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles
         size = 1;
     }
 
-    return TypeShape(size, alignment, depth, max_handles, max_out_of_line);
+    for (size_t i = 0; i + 1 < fields->size(); i++) {
+        auto& current = fields->at(i);
+        auto& next = fields->at(i + 1);
+        current->SetPadding(next->Offset() - current->Offset() - current->Size());
+        has_padding |= current->Padding() > 0;
+    }
+    if (!fields->empty()) {
+        auto& last = fields->back();
+        last->SetPadding(size - last->Offset() - last->Size());
+        has_padding |= last->Padding() > 0;
+    }
+
+    return TypeShape(size, alignment, depth, max_handles, max_out_of_line, has_padding);
 }
 
 // why is clamped add/multiply OK for calculating sizes? it avoids overflow
@@ -85,7 +99,7 @@ TypeShape PointerTypeShape(const TypeShape& element, uint32_t max_element_count 
 
     uint32_t max_handles = ClampedAdd(element.MaxHandles(), max_element_count);
 
-    return TypeShape(8u, 8u, depth, max_handles, max_out_of_line);
+    return TypeShape(8u, 8u, depth, max_handles, max_out_of_line, element.HasPadding());
 }
 
 TypeShape ArrayType::Shape(TypeShape element, uint32_t count) {
@@ -93,7 +107,8 @@ TypeShape ArrayType::Shape(TypeShape element, uint32_t count) {
                      element.Alignment(),
                      element.Depth(),
                      ClampedMultiply(element.MaxHandles(), count),
-                     ClampedMultiply(element.MaxOutOfLine(), count));
+                     ClampedMultiply(element.MaxOutOfLine(), count),
+                     element.HasPadding());
 }
 
 TypeShape VectorType::Shape(TypeShape element, uint32_t max_element_count) {
@@ -107,7 +122,7 @@ TypeShape StringType::Shape(uint32_t max_length) {
     auto size = FieldShape(PrimitiveType::Shape(types::PrimitiveSubtype::kUint64));
     auto data = FieldShape(PointerTypeShape(PrimitiveType::Shape(types::PrimitiveSubtype::kUint8), max_length));
     std::vector<FieldShape*> header{&size, &data};
-    return Struct::Shape(&header);
+    return Struct::Shape(&header, 0);
 }
 
 uint32_t PrimitiveType::SubtypeSize(types::PrimitiveSubtype subtype) {
