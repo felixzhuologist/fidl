@@ -415,6 +415,8 @@ struct Decl {
         kBits,
         kEnum,
         kStruct,
+        kUnion,
+        kXUnion,
     };
 
     Decl(Kind kind, std::unique_ptr<raw::AttributeList> attributes, Name name)
@@ -706,6 +708,57 @@ struct Struct : public TypeDecl {
     static TypeShape Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles = 0u);
 };
 
+struct Union : public TypeDecl {
+    struct Member {
+        Member(std::unique_ptr<raw::AttributeList> attributes,
+               std::unique_ptr<TypeConstructor> type_ctor,
+               SourceLocation name)
+            : attributes(std::move(attributes)),
+              type_ctor(std::move(type_ctor)),
+              name(std::move(name)) {}
+        std::unique_ptr<raw::AttributeList> attributes;
+        std::unique_ptr<TypeConstructor> type_ctor;
+        SourceLocation name;
+        FieldShape fieldshape;
+    };
+
+    Union(std::unique_ptr<raw::AttributeList> attributes, Name name, std::vector<Member> members)
+        : TypeDecl(Kind::kUnion, std::move(attributes), std::move(name)),
+          members(std::move(members)) {}
+
+    std::vector<Member> members;
+    // stores the offset of all of the union members?
+    FieldShape membershape;
+
+    static TypeShape Shape(std::vector<FieldShape*>* fields);
+};
+
+struct XUnion : public TypeDecl {
+    struct Member {
+        Member(std::unique_ptr<raw::Ordinal> ordinal,
+               std::unique_ptr<raw::AttributeList> attributes,
+               std::unique_ptr<TypeConstructor> type_ctor,
+               SourceLocation name)
+            : ordinal(std::move(ordinal)),
+              attributes(std::move(attributes)),
+              type_ctor(std::move(type_ctor)),
+              name(std::move(name)) {}
+
+        std::unique_ptr<raw::Ordinal> ordinal;
+        std::unique_ptr<raw::AttributeList> attributes;
+        std::unique_ptr<TypeConstructor> type_ctor;
+        SourceLocation name;
+        FieldShape fieldshape;
+    };
+
+    XUnion(std::unique_ptr<raw::AttributeList> attributes, Name name, std::vector<Member> members)
+        : TypeDecl(Kind::kXUnion, std::move(attributes), std::move(name)),
+          members(std::move(members)) {}
+
+    std::vector<Member> members;
+
+    static TypeShape Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles = 0u);
+};
 
 class TypeTemplate {
 public:
@@ -806,6 +859,10 @@ public:
         kEnumMember,
         kStructDecl,
         kStructMember,
+        kUnionDecl,
+        kUnionMember,
+        kXUnionDecl,
+        kXUnionMember,
     };
 
     AttributeSchema(const std::set<Placement>& allowed_placements,
@@ -915,6 +972,8 @@ public:
     std::vector<std::unique_ptr<Bits>> bits_declarations_;
     std::vector<std::unique_ptr<Enum>> enum_declarations_;
     std::vector<std::unique_ptr<Struct>> struct_declarations_;
+    std::vector<std::unique_ptr<Union>> union_declarations_;
+    std::vector<std::unique_ptr<XUnion>> xunion_declarations_;
 
 private:
     friend class TypeAliasTypeTemplate;
@@ -950,6 +1009,8 @@ private:
     bool ConsumeBitsDeclaration(std::unique_ptr<raw::BitsDeclaration> bits_declaration);
     bool ConsumeEnumDeclaration(std::unique_ptr<raw::EnumDeclaration> enum_declaration);
     bool ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration);
+    bool ConsumeUnionDeclaration(std::unique_ptr<raw::UnionDeclaration> union_declaration);
+    bool ConsumeXUnionDeclaration(std::unique_ptr<raw::XUnionDeclaration> xunion_declaration);
 
     bool TypeCanBeConst(const Type* type);
     const Type* TypeResolve(const Type* type);
@@ -968,6 +1029,8 @@ private:
     bool CompileBits(Bits* bits_declaration);
     bool CompileEnum(Enum* enum_declaration);
     bool CompileStruct(Struct* struct_declaration);
+    bool CompileUnion(Union* union_declaration);
+    bool CompileXUnion(XUnion* xunion_declaration);
 
     bool CompileTypeConstructor(TypeConstructor* type, TypeShape* out_type_metadata);
 

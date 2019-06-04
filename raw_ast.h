@@ -96,6 +96,16 @@ public:
     void Accept(TreeVisitor* visitor) const;
 };
 
+class Ordinal final : public SourceElement {
+public:
+    Ordinal(SourceElement const& element, uint32_t value)
+        : SourceElement(element), value(value) {}
+
+    void Accept(TreeVisitor* visitor) const;
+
+    const uint32_t value;
+};
+
 class TrueLiteral : public Literal {
 public:
     TrueLiteral(SourceElement const& element)
