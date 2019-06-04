@@ -23,7 +23,7 @@ uint32_t AlignTo(uint64_t size, uint64_t alignment) {
                  static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
 }
 
-uint32_t ClampedMultipy(uint32_t a, uint32_t b) {
+uint32_t ClampedMultiply(uint32_t a, uint32_t b) {
     return static_cast<uint32_t>(
         std::min(static_cast<uint64_t>(a) * static_cast<uint64_t>(b),
                  static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
@@ -41,6 +41,7 @@ TypeShape Struct::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles
     uint32_t depth = 0u;
     uint32_t max_handles = 0u;
     uint32_t max_out_of_line = 0u;
+    bool has_padding = false;
 
     for (FieldShape* field : *fields) {
         TypeShape typeshape = field->Typeshape();
@@ -51,6 +52,7 @@ TypeShape Struct::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles
         depth = std::max(depth, field->Depth());
         max_handles = ClampedAdd(max_handles, typeshape.MaxHandles());
         max_out_of_line = ClampedAdd(max_out_of_line, typeshape.MaxOutOfLine());
+        has_padding |= typeshape.HasPadding();
     }
 
     max_handles = ClampedAdd(max_handles, extra_handles);
@@ -65,35 +67,134 @@ TypeShape Struct::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles
         size = 1;
     }
 
-    return TypeShape(size, alignment, depth, max_handles, max_out_of_line);
+    for (size_t i = 0; i + 1 < fields->size(); ++i) {
+        auto& current = fields->at(i);
+        auto& next = fields->at(i + 1);
+        current->SetPadding(next->Offset() - current->Offset() - current->Size());
+        has_padding |= current->Padding() > 0;
+    }
+    if (!fields->empty()) {
+        auto& last = fields->back();
+        last->SetPadding(size - last->Offset() - last->Size());
+        has_padding |= last->Padding() > 0;
+    }
+
+    return TypeShape(size, alignment, depth, max_handles, max_out_of_line, has_padding);
 }
 
-// why is clamped add/multiply OK for calculating sizes? it avoids overflow
-// but then the calculated is size (the element sizes don't get clamped magically...)
+TypeShape Union::Shape(std::vector<FieldShape*>* fields) {
+    uint32_t size = 0u;
+    uint32_t alignment = 0u;
+    uint32_t depth = 0u;
+    uint32_t max_handles = 0u;
+    uint32_t max_out_of_line = 0u;
+    bool has_padding = false;
+
+    for (const auto& field : *fields) {
+        auto& fieldshape = *field;
+        size = std::max(size, fieldshape.Size());
+        alignment = std::max(alignment, fieldshape.Alignment());
+        depth = std::max(depth, fieldshape.Depth());
+        max_handles = std::max(max_handles, fieldshape.Typeshape().MaxHandles());
+        max_out_of_line = std::max(max_out_of_line, fieldshape.Typeshape().MaxOutOfLine());
+        has_padding |= fieldshape.Typeshape().HasPadding();
+    }
+
+    size = AlignTo(size, alignment);
+
+    // calculate offset of the union tag
+    auto member_typeshape = TypeShape(size, alignment, depth, max_handles, max_out_of_line);
+    auto member_fieldshape = FieldShape(member_typeshape);
+    auto tag = FieldShape(PrimitiveType::Shape(types::PrimitiveSubtype::kUint32));
+    std::vector<FieldShape*> fidl_union = {&tag, &member_fieldshape};
+    // update offset in membershape
+    auto typeshape = Struct::Shape(&fidl_union, 0);
+
+    auto offset = member_fieldshape.Offset();
+    assert(offset == 4 || offset == 8);
+    for (auto& field : *fields) {
+        field->SetOffset(offset);
+    }
+
+    // the tag is 4 bytes, so padding is required between the tag and the first
+    // union member if the union member has an alignment greater than 4 (ie 8)
+    if (offset == 8) {
+        has_padding = true;
+    }
+
+    for (auto& field : *fields) {
+        // padding is from end of member to end of the entire union
+        field->SetPadding(typeshape.Size() - offset - field->Size());
+        has_padding |= field->Padding() > 0;
+    }
+
+    return TypeShape(size, alignment, depth, max_handles, max_out_of_line, has_padding);
+}
+
 TypeShape PointerTypeShape(const TypeShape& element, uint32_t max_element_count = 1u) {
+    // Because FIDL supports recursive data structures, we might not have
+    // computed the TypeShape for the element we're pointing to. In that case,
+    // the size will be zero and we'll use |numeric_limits<uint32_t>::max()| as
+    // the depth. We'll never see a zero size for a real TypeShape because empty
+    // structs are banned.
+    //
+    // We're careful to check for saturation before incrementing the depth
+    // because recursive data structures have a depth pegged at the numeric
+    // limit.
     uint32_t depth = std::numeric_limits<uint32_t>::max();
-    // we may not have computed the typeshape for element if this is a recursive data structure
     if (element.Size() > 0 && element.Depth() < std::numeric_limits<uint32_t>::max())
         depth = ClampedAdd(element.Depth(), 1);
 
-    uint32_t elements_size = ClampedMultipy(element.Size(), max_element_count);
-    // out of line data is aligned to 8 bytes
+    // The element(s) will be stored out-of-line.
+    uint32_t elements_size = ClampedMultiply(element.Size(), max_element_count);
+    // Out-of-line data is aligned to 8 bytes.
     elements_size = AlignTo(elements_size, 8);
-    // elements may carry their own out of line dat
-    uint32_t elements_out_of_line = ClampedMultipy(element.MaxOutOfLine(), max_element_count);
+    // The elements may each carry their own out-of-line data.
+    uint32_t elements_out_of_line = ClampedMultiply(element.MaxOutOfLine(), max_element_count);
+
+    uint32_t max_handles = ClampedMultiply(element.MaxHandles(), max_element_count);
     uint32_t max_out_of_line = ClampedAdd(elements_size, elements_out_of_line);
 
-    uint32_t max_handles = ClampedAdd(element.MaxHandles(), max_element_count);
+    return TypeShape(8u, 8u, depth, max_handles, max_out_of_line, element.HasPadding());
+}
 
-    return TypeShape(8u, 8u, depth, max_handles, max_out_of_line);
+TypeShape CEnvelopeTypeShape(const TypeShape& contained_type) {
+    auto packed_sizes_field = FieldShape(PrimitiveType::Shape(types::PrimitiveSubtype::kUint64));
+    auto pointer_type = FieldShape(PointerTypeShape(contained_type));
+    std::vector<FieldShape*> header{&packed_sizes_field, &pointer_type};
+    return Struct::Shape(&header);
+}
+
+TypeShape XUnion::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles) {
+    uint32_t depth = 0u;
+    uint32_t max_handles = 0u;
+    uint32_t max_out_of_line = 0u;
+    bool has_padding = false;
+
+    for (auto& field : *fields) {
+        const auto& envelope = CEnvelopeTypeShape(field->Typeshape());
+
+        depth = ClampedAdd(depth, envelope.Depth());
+        max_handles = ClampedAdd(max_handles, envelope.MaxHandles());
+        max_out_of_line = std::max(max_out_of_line, envelope.MaxOutOfLine());
+        has_padding |= field->Typeshape().HasPadding();
+    }
+
+    // XUnion payload is aligned to 8 bytes.
+    for (auto& field : *fields) {
+        field->SetPadding(AlignTo(field->Size(), 8) - field->Size());
+        has_padding |= field->Padding() > 0;
+    }
+
+    return TypeShape(24u, 8u, depth, max_handles, max_out_of_line, has_padding);
 }
 
 TypeShape ArrayType::Shape(TypeShape element, uint32_t count) {
-    return TypeShape(ClampedMultipy(element.Size(), count),
+    return TypeShape(ClampedMultiply(element.Size(), count),
                      element.Alignment(),
                      element.Depth(),
-                     ClampedMultipy(element.MaxHandles(), count),
-                     ClampedMultipy(element.MaxOutOfLine(), count));
+                     ClampedMultiply(element.MaxHandles(), count),
+                     ClampedMultiply(element.MaxOutOfLine(), count));
 }
 
 TypeShape VectorType::Shape(TypeShape element, uint32_t max_element_count) {
@@ -934,6 +1035,60 @@ bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> s
     return RegisterDecl(struct_declarations_.back().get());
 }
 
+bool Library::ConsumeUnionDeclaration(std::unique_ptr<raw::UnionDeclaration> union_declaration) {
+    std::vector<Union::Member> members;
+    for (auto& member : union_declaration->members) {
+        std::unique_ptr<TypeConstructor> type_ctor;
+        if (!ConsumeTypeConstructor(std::move(member->type_ctor), &type_ctor))
+            return false;
+
+        auto attributes = std::move(member->attributes);
+        auto location = member->identifier->location();
+        members.emplace_back(std::move(attributes), std::move(type_ctor), location);
+    }
+
+    auto attributes = std::move(union_declaration->attributes);
+    auto name = Name(this, union_declaration->identifier->location());
+    union_declarations_.push_back(
+        std::make_unique<Union>(
+            std::move(attributes),
+            std::move(name),
+            std::move(members)));
+    return RegisterDecl(union_declarations_.back().get());
+}
+
+bool Library::ConsumeXUnionDeclaration(std::unique_ptr<raw::XUnionDeclaration> xunion_declaration) {
+    std::vector<XUnion::Member> members;
+    int ordinal_val = 0;
+    for (auto& member : xunion_declaration->members) {
+        // TODO: generate ordinal the correct way
+        auto ordinal = std::make_unique<raw::Ordinal>(*member, ordinal_val++);
+
+        std::unique_ptr<TypeConstructor> type_ctor;
+        if (!ConsumeTypeConstructor(std::move(member->type_ctor), &type_ctor))
+            return false;
+
+        if (type_ctor->nullability != types::Nullability::kNonnullable) {
+            return Fail(member->location(), "Extensible union members cannot be nullable");
+        }
+
+        auto location = member->identifier->location();
+        members.emplace_back(
+            std::move(ordinal),
+            std::move(member->attributes),
+            std::move(type_ctor),
+            location);
+    }
+
+    auto name = Name(this, xunion_declaration->identifier->location());
+    xunion_declarations_.push_back(
+        std::make_unique<XUnion>(
+            std::move(xunion_declaration->attributes),
+            std::move(name),
+            std::move(members)));
+    return RegisterDecl(xunion_declarations_.back().get());
+}
+
 bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
     if (file->attributes) {
         ValidateAttributesPlacement(AttributeSchema::Placement::kLibrary, file->attributes.get());
@@ -998,6 +1153,20 @@ bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
     auto struct_declaration_list = std::move(file->struct_declaration_list);
     for (auto& struct_declaration : struct_declaration_list) {
         if (!ConsumeStructDeclaration(std::move(struct_declaration))) {
+            return false;
+        }
+    }
+
+    auto union_declaration_list = std::move(file->union_declaration_list);
+    for (auto& union_declaration : union_declaration_list) {
+        if (!ConsumeUnionDeclaration(std::move(union_declaration))) {
+            return false;
+        }
+    }
+
+    auto xunion_declaration_list = std::move(file->xunion_declaration_list);
+    for (auto& xunion_declaration : xunion_declaration_list) {
+        if (!ConsumeXUnionDeclaration(std::move(xunion_declaration))) {
             return false;
         }
     }
@@ -1313,11 +1482,25 @@ bool Library::TypeIsConvertibleTo(const Type* from_type, const Type* to_type) {
 Decl* Library::LookupConstant(const TypeConstructor* type_ctor, const Name& name) {
     auto decl = LookupDeclByName(type_ctor->name);
     if (decl == nullptr) {
+        // the constant is not of a user defined type, which means that it must
+        // be declared as a top level const since those can only  have a type
+        // of string or primitive type
         auto iter = constants_.find(&name);
         if (iter == constants_.end()) {
             return nullptr;
         }
         return iter->second;
+    }
+
+    // otherwise, the only user defined type that constants can be is of an enum
+    if (decl->kind != Decl::Kind::kEnum)
+        return nullptr;
+
+    auto enum_decl = static_cast<Enum*>(decl);
+    for (auto& member : enum_decl->members) {
+        if (member.name.data() == name.name_part()) {
+            return enum_decl;
+        }
     }
 
     return nullptr;
@@ -1420,7 +1603,20 @@ bool Library::DeclDependencies(Decl* decl, std::set<Decl*>* out_edges) {
         }
         break;
     }
-
+    case Decl::Kind::kUnion: {
+        auto union_decl = static_cast<const Union*>(decl);
+        for (const auto& member : union_decl->members) {
+            maybe_add_decl(member.type_ctor.get());
+        }
+        break;
+    }
+    case Decl::Kind::kXUnion: {
+        auto xunion_decl = static_cast<const XUnion*>(decl);
+        for (const auto& member : xunion_decl->members) {
+            maybe_add_decl(member.type_ctor.get());
+        }
+        break;
+    }
     }
     *out_edges = std::move(edges);
     return true;
@@ -1585,6 +1781,18 @@ bool Library::CompileDecl(Decl* decl) {
             return false;
         break;
     }
+    case Decl::Kind::kUnion: {
+        auto union_decl = static_cast<Union*>(decl);
+        if (!CompileUnion(union_decl))
+            return false;
+        break;
+    }
+    case Decl::Kind::kXUnion: {
+        auto xunion_decl = static_cast<XUnion*>(decl);
+        if (!CompileXUnion(xunion_decl))
+            return false;
+        break;
+    }
     } // switch
     return true;
 }
@@ -1643,6 +1851,39 @@ bool Library::VerifyDeclAttributes(Decl* decl) {
         if (placement_ok.NoNewErrors()) {
             ValidateAttributesConstraints(
                 struct_decl, struct_decl->attributes.get());
+        }
+    }
+    case Decl::Kind::kUnion: {
+        auto union_declaration = static_cast<Union*>(decl);
+        ValidateAttributesPlacement(
+            AttributeSchema::Placement::kUnionDecl,
+            union_declaration->attributes.get());
+        for (const auto& member : union_declaration->members) {
+            ValidateAttributesPlacement(
+                AttributeSchema::Placement::kUnionMember,
+                member.attributes.get());
+        }
+        if (placement_ok.NoNewErrors()) {
+            ValidateAttributesConstraints(
+                union_declaration,
+                union_declaration->attributes.get());
+        }
+        break;
+    }
+    case Decl::Kind::kXUnion: {
+        auto xunion_declaration = static_cast<XUnion*>(decl);
+        ValidateAttributesPlacement(
+            AttributeSchema::Placement::kXUnionDecl,
+            xunion_declaration->attributes.get());
+        for (const auto& member : xunion_declaration->members) {
+            ValidateAttributesPlacement(
+                AttributeSchema::Placement::kXUnionMember,
+                member.attributes.get());
+        }
+        if (placement_ok.NoNewErrors()) {
+            ValidateAttributesConstraints(
+                xunion_declaration,
+                xunion_declaration->attributes.get());
         }
     }
     } // switch
@@ -1801,6 +2042,71 @@ bool Library::CompileStruct(Struct* struct_declaration) {
     }
 
     struct_declaration->typeshape = Struct::Shape(&fidl_struct, max_member_handles);
+
+    return true;
+}
+
+bool Library::CompileUnion(Union* union_decl) {
+    Scope<StringView> scope;
+    std::vector<FieldShape*> fields;
+    for (auto& member : union_decl->members) {
+        auto name_result = scope.Insert(member.name.data(), member.name);
+        if (!name_result.ok())
+            return Fail(member.name,
+                        "Multiple union members with the same name; previous was at " +
+                            name_result.previous_occurrence().position());
+        if (!CompileTypeConstructor(member.type_ctor.get(), &member.fieldshape.Typeshape()))
+            return false;
+
+        fields.push_back(&member.fieldshape);
+    }
+
+    auto tag = FieldShape(PrimitiveType::Shape(types::PrimitiveSubtype::kUint32));
+    union_decl->membershape = FieldShape(Union::Shape(&fields));
+    uint32_t extra_handles = 0;
+    if (union_decl->recursive && union_decl->membershape.MaxHandles()) {
+        extra_handles = std::numeric_limits<uint32_t>::max();
+    }
+    std::vector<FieldShape*> fidl_union = {&tag, &union_decl->membershape};
+    union_decl->typeshape = Struct::Shape(&fidl_union, extra_handles);
+
+    return true;
+}
+
+bool Library::CompileXUnion(XUnion* xunion_declaration) {
+    Scope<StringView> scope;
+    Scope<uint32_t> ordinal_scope;
+
+    for (auto& member : xunion_declaration->members) {
+        auto ordinal_result = ordinal_scope.Insert(member.ordinal->value, member.ordinal->location());
+        if (!ordinal_result.ok())
+            return Fail(member.ordinal->location(),
+                        "Multiple xunion fields with the same ordinal; previous was at " +
+                            ordinal_result.previous_occurrence().position());
+
+        auto name_result = scope.Insert(member.name.data(), member.name);
+        if (!name_result.ok())
+            return Fail(member.name,
+                        "Multiple xunion members with the same name; previous was at " +
+                            name_result.previous_occurrence().position());
+
+        if (!CompileTypeConstructor(member.type_ctor.get(), &member.fieldshape.Typeshape()))
+            return false;
+    }
+
+    uint32_t max_member_handles;
+    if (xunion_declaration->recursive) {
+        max_member_handles = std::numeric_limits<uint32_t>::max();
+    } else {
+        // Member handles will be counted by CXUnionTypeShape.
+        max_member_handles = 0u;
+    }
+
+    std::vector<FieldShape*> fields;
+    for (auto& member : xunion_declaration->members) {
+        fields.push_back(&member.fieldshape);
+    }
+    xunion_declaration->typeshape = XUnion::Shape(&fields, max_member_handles);
 
     return true;
 }

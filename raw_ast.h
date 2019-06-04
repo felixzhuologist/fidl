@@ -32,12 +32,12 @@ public:
 
 class SourceElementMark {
 public:
-    SourceElementMark(TreeVisitor& tv, const SourceElement& element);
+    SourceElementMark(TreeVisitor* tv, const SourceElement& element);
 
     ~SourceElementMark();
 
 private:
-    TreeVisitor& tv_;
+    TreeVisitor* tv_;
     const SourceElement& element_;
 };
 
@@ -48,7 +48,7 @@ public:
 
     virtual ~Identifier() {}
 
-    void Accept(TreeVisitor& visitor) {
+    void Accept(TreeVisitor* visitor) {
         SourceElementMark sem(visitor, *this);
     }
 };
@@ -62,7 +62,7 @@ public:
 
     std::vector<std::unique_ptr<Identifier>> components;
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 };
 
 class Literal : public SourceElement {
@@ -87,7 +87,7 @@ public:
     explicit StringLiteral(SourceElement const& element)
         : Literal(element, Kind::kString) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 };
 
 class NumericLiteral : public Literal {
@@ -95,7 +95,17 @@ public:
     NumericLiteral(SourceElement const& element)
         : Literal(element, Kind::kNumeric) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
+};
+
+class Ordinal final : public SourceElement {
+public:
+    Ordinal(SourceElement const& element, uint32_t value)
+        : SourceElement(element), value(value) {}
+
+    void Accept(TreeVisitor* visitor);
+
+    const uint32_t value;
 };
 
 class TrueLiteral : public Literal {
@@ -103,7 +113,7 @@ public:
     TrueLiteral(SourceElement const& element)
         : Literal(element, Kind::kTrue) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 };
 
 class FalseLiteral : public Literal {
@@ -111,7 +121,7 @@ public:
     FalseLiteral(SourceElement const& element)
         : Literal(element, Kind::kFalse) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 };
 
 class Constant : public SourceElement {
@@ -136,7 +146,7 @@ public:
 
     std::unique_ptr<CompoundIdentifier> identifier;
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 };
 
 
@@ -147,7 +157,7 @@ public:
 
     std::unique_ptr<Literal> literal;
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 };
 
 class Attribute : public SourceElement {
@@ -155,7 +165,7 @@ public:
     Attribute(SourceElement const& element, std::string name, std::string value)
         : SourceElement(element), name(std::move(name)), value(std::move(value)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     const std::string name;
     const std::string value;
@@ -174,7 +184,7 @@ public:
         return false;
     }
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::vector<std::unique_ptr<Attribute>> attributes;
 };
@@ -192,7 +202,7 @@ public:
           maybe_size(std::move(maybe_size)),
           nullability(nullability) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<CompoundIdentifier> identifier;
     std::unique_ptr<TypeConstructor> maybe_arg_type_ctor;
@@ -222,7 +232,7 @@ public:
       : Using(element, Kind::kLibrary), using_path(std::move(using_path)),
         maybe_alias(std::move(maybe_alias)) {}
 
-  void Accept(TreeVisitor& visitor);
+  void Accept(TreeVisitor* visitor);
 
   std::unique_ptr<CompoundIdentifier> using_path;
   std::unique_ptr<Identifier> maybe_alias;
@@ -235,7 +245,7 @@ public:
         std::unique_ptr<TypeConstructor> type_ctor)
       : Using(element, Kind::kAlias), alias(std::move(alias)), type_ctor(std::move(type_ctor)) {}
 
-  void Accept(TreeVisitor& visitor);
+  void Accept(TreeVisitor* visitor);
 
   std::unique_ptr<Identifier> alias;
   std::unique_ptr<TypeConstructor> type_ctor;
@@ -254,7 +264,7 @@ public:
           identifier(std::move(identifier)),
           constant(std::move(constant)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<TypeConstructor> type_ctor;
@@ -273,7 +283,7 @@ public:
           identifier(std::move(identifier)),
           value(std::move(value)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<Identifier> identifier;
@@ -293,7 +303,7 @@ public:
           maybe_type_ctor(std::move(maybe_type_ctor)),
           members(std::move(members)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<Identifier> identifier;
@@ -312,7 +322,7 @@ public:
           identifier(std::move(identifier)),
           value(std::move(value)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<Identifier> identifier;
@@ -332,7 +342,7 @@ public:
           maybe_type_ctor(std::move(maybe_type_ctor)),
           members(std::move(members)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<Identifier> identifier;
@@ -353,7 +363,7 @@ public:
       identifier(std::move(identifier)),
       maybe_default_value(std::move(maybe_default_value)) {}
 
-      void Accept(TreeVisitor& visitor);
+      void Accept(TreeVisitor* visitor);
 
       std::unique_ptr<AttributeList> attributes;
       std::unique_ptr<TypeConstructor> type_ctor;
@@ -372,7 +382,7 @@ public:
       identifier(std::move(identifier)),
       members(std::move(members)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<Identifier> identifier;
@@ -390,7 +400,7 @@ public:
           type_ctor(std::move(type_ctor)),
           identifier(std::move(identifier)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<TypeConstructor> type_ctor;
@@ -408,7 +418,7 @@ public:
           identifier(std::move(identifier)),
           members(std::move(members)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<Identifier> identifier;
@@ -426,7 +436,7 @@ public:
           type_ctor(std::move(type_ctor)),
           identifier(std::move(identifier)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<TypeConstructor> type_ctor;
@@ -444,7 +454,7 @@ public:
           identifier(std::move(identifier)),
           members(std::move(members)) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<Identifier> identifier;
@@ -476,7 +486,7 @@ public:
           xunion_declaration_list(std::move(xunion_declaration_list)),
           end_(end) {}
 
-    void Accept(TreeVisitor& visitor);
+    void Accept(TreeVisitor* visitor);
 
     std::unique_ptr<AttributeList> attributes;
     std::unique_ptr<CompoundIdentifier> library_name;
