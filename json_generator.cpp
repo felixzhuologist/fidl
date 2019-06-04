@@ -7,11 +7,23 @@ namespace {
 
 constexpr const char* kIndent = "  ";
 
-void EmitBoolean(std::ostream* file, bool value) {
+// ConstantStyle indicates whether the constant value to be emitted should be
+// directly placed in the JSON output, or whether is must be wrapped in a
+// string.
+enum ConstantStyle {
+    kAsConstant,
+    kAsString,
+};
+
+void EmitBoolean(std::ostream* file, bool value, ConstantStyle style = kAsConstant) {
+    if (style == kAsString)
+        *file << "\"";
     if (value)
         *file << "true";
     else
         *file << "false";
+    if (style == kAsString)
+        *file << "\"";
 }
 
 void EmitString(std::ostream* file, StringView value) {
@@ -39,6 +51,25 @@ void EmitString(std::ostream* file, StringView value) {
 
 void EmitLiteral(std::ostream* file, StringView value) {
     file->rdbuf()->sputn(value.data(), value.size());
+}
+
+template <typename ValueType>
+void EmitNumeric(std::ostream* file, ValueType value, ConstantStyle style = kAsConstant) {
+    static_assert(std::is_arithmetic<ValueType>::value && !std::is_same<ValueType, bool>::value,
+                  "EmitNumeric can only be used with a numeric ValueType!");
+    static_assert(std::is_arithmetic<ValueType>::value && !std::is_same<ValueType, uint8_t>::value,
+                  "EmitNumeric does not work for uint8_t, upcast to uint64_t");
+    static_assert(std::is_arithmetic<ValueType>::value && !std::is_same<ValueType, int8_t>::value,
+                  "EmitNumeric does not work for int8_t, upcast to int64_t");
+
+    switch (style) {
+    case ConstantStyle::kAsConstant:
+        *file << value;
+        break;
+    case ConstantStyle::kAsString:
+        *file << "\"" << value << "\"";
+        break;
+    }
 }
 
 void EmitUint32(std::ostream* file, uint32_t value) {
@@ -247,6 +278,10 @@ void JSONGenerator::Generate(const raw::AttributeList& value) {
     Generate(value.attributes);
 }
 
+void JSONGenerator::Generate(const raw::Ordinal& value) {
+    EmitNumeric(&json_file_, value.value);
+}
+
 void JSONGenerator::Generate(const flat::Constant& value) {
     GenerateObject([&]() {
         GenerateObjectMember("kind", NameFlatConstantKind(value.kind), Position::kFirst);
@@ -313,6 +348,29 @@ void JSONGenerator::Generate(const flat::Name& value) {
     Generate(NameName(value, ".", "/"));
 }
 
+void JSONGenerator::Generate(const flat::Bits& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+        GenerateObjectMember("type", value.subtype_ctor->type);
+
+        GenerateObjectPunctuation(Position::kSubsequent);
+        EmitObjectKey(&json_file_, indent_level_, "mask");
+        EmitNumeric(&json_file_, value.mask, kAsString);
+        GenerateObjectMember("members", value.members);
+    });
+}
+
+void JSONGenerator::Generate(const flat::Bits::Member& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        GenerateObjectMember("value", value.value);
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+    });
+}
+
 void JSONGenerator::Generate(const flat::Const& value) {
     GenerateObject([&]() {
         GenerateObjectMember("name", value.name, Position::kFirst);
@@ -321,6 +379,27 @@ void JSONGenerator::Generate(const flat::Const& value) {
             GenerateObjectMember("maybe_attributes", value.attributes);
         GenerateObjectMember("type", value.type_ctor->type);
         GenerateObjectMember("value", value.value);
+    });
+}
+
+void JSONGenerator::Generate(const flat::Enum& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        GenerateObjectMember("location", NameLocation(value.name));
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+        GenerateObjectMember("type", value.type->subtype);
+        GenerateObjectMember("members", value.members);
+    });
+}
+
+void JSONGenerator::Generate(const flat::Enum::Member& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        GenerateObjectMember("location", NameLocation(value.name));
+        GenerateObjectMember("value", value.value);
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
     });
 }
 
@@ -353,6 +432,63 @@ void JSONGenerator::Generate(const flat::Struct::Member& value) {
         GenerateObjectMember("alignment", value.fieldshape.Alignment());
         GenerateObjectMember("offset", value.fieldshape.Offset());
         GenerateObjectMember("max_handles", value.fieldshape.MaxHandles());
+    });
+}
+
+void JSONGenerator::Generate(const flat::Union& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        GenerateObjectMember("location", NameLocation(value.name));
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+        GenerateObjectMember("members", value.members);
+        GenerateObjectMember("size", value.typeshape.Size());
+        GenerateObjectMember("max_out_of_line", value.typeshape.MaxOutOfLine());
+        GenerateObjectMember("alignment", value.typeshape.Alignment());
+        GenerateObjectMember("max_handles", value.typeshape.MaxHandles());
+    });
+}
+
+void JSONGenerator::Generate(const flat::Union::Member& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("type", value.type_ctor->type, Position::kFirst);
+        GenerateObjectMember("name", value.name);
+        GenerateObjectMember("location", NameLocation(value.name));
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+        GenerateObjectMember("size", value.fieldshape.Size());
+        GenerateObjectMember("max_out_of_line", value.fieldshape.MaxOutOfLine());
+        GenerateObjectMember("alignment", value.fieldshape.Alignment());
+        GenerateObjectMember("offset", value.fieldshape.Offset());
+    });
+}
+
+void JSONGenerator::Generate(const flat::XUnion& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        GenerateObjectMember("location", NameLocation(value.name));
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+        GenerateObjectMember("members", value.members);
+        GenerateObjectMember("size", value.typeshape.Size());
+        GenerateObjectMember("max_out_of_line", value.typeshape.MaxOutOfLine());
+        GenerateObjectMember("alignment", value.typeshape.Alignment());
+        GenerateObjectMember("max_handles", value.typeshape.MaxHandles());
+    });
+}
+
+void JSONGenerator::Generate(const flat::XUnion::Member& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("ordinal", value.ordinal, Position::kFirst);
+        GenerateObjectMember("type", value.type_ctor->type);
+        GenerateObjectMember("name", value.name);
+        GenerateObjectMember("location", NameLocation(value.name));
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+        GenerateObjectMember("size", value.fieldshape.Size());
+        GenerateObjectMember("max_out_of_line", value.fieldshape.MaxOutOfLine());
+        GenerateObjectMember("alignment", value.fieldshape.Alignment());
+        GenerateObjectMember("offset", value.fieldshape.Offset());
     });
 }
 
@@ -423,8 +559,12 @@ std::ostringstream JSONGenerator::Produce() {
         }
         GenerateObjectMember("library_dependencies", dependencies);
 
+        GenerateObjectMember("bits_declarations", library_->bits_declarations_);
         GenerateObjectMember("const_declarations", library_->const_declarations_);
+        GenerateObjectMember("enum_declarations", library_->enum_declarations_);
         GenerateObjectMember("struct_declarations", library_->struct_declarations_);
+        GenerateObjectMember("union_declarations", library_->union_declarations_);
+        GenerateObjectMember("xunion_declarations", library_->xunion_declarations_);
 
         std::vector<std::string> declaration_order;
         for (flat::Decl* decl : library_->declaration_order_) {

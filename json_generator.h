@@ -68,13 +68,22 @@ private:
     void Generate(const raw::Literal& value);
     void Generate(const raw::Attribute& value);
     void Generate(const raw::AttributeList& value);
+    void Generate(const raw::Ordinal& value);
 
     void Generate(const flat::Name& value);
     void Generate(const flat::Type* value);
     void Generate(const flat::Constant& value);
     void Generate(const flat::Const& value);
+    void Generate(const flat::Bits& value);
+    void Generate(const flat::Bits::Member& value);
+    void Generate(const flat::Enum& value);
+    void Generate(const flat::Enum::Member& value);
     void Generate(const flat::Struct& value);
     void Generate(const flat::Struct::Member& value);
+    void Generate(const flat::Union& value);
+    void Generate(const flat::Union::Member& value);
+    void Generate(const flat::XUnion& value);
+    void Generate(const flat::XUnion::Member& value);
     void Generate(const flat::Library* library);
 
     void GenerateDeclarationsEntry(int count, const flat::Name& name, StringView decl);
