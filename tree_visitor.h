@@ -62,6 +62,10 @@ public:
         element.Accept(this);
     }
 
+    virtual void OnOrdinal(Ordinal& element) {
+        element.Accept(this);
+    }
+
     virtual void OnConstant(std::unique_ptr<Constant> const& element) {
         Constant::Kind kind = element->kind;
         std::unique_ptr<Constant>& unconst_element = const_cast<std::unique_ptr<Constant>&>(element);
@@ -151,6 +155,14 @@ public:
     }
 
     virtual void OnStructDeclaration(std::unique_ptr<StructDeclaration> const& element) {
+        element->Accept(this);
+    }
+
+    virtual void OnTableMember(std::unique_ptr<TableMember> const& element) {
+        element->Accept(this);
+    }
+
+    virtual void OnTableDeclaration(std::unique_ptr<TableDeclaration> const& element) {
         element->Accept(this);
     }
 

@@ -158,6 +158,33 @@ TypeShape CEnvelopeTypeShape(const TypeShape& contained_type) {
     return Struct::Shape(&header);
 }
 
+TypeShape Table::Shape(std::vector<TypeShape*>* fields, uint32_t extra_handles) {
+    uint32_t depth = 0u;
+    uint32_t max_handles = 0u;
+    uint32_t max_out_of_line = 0u;
+    uint32_t array_size = 0u;
+
+    for (auto& field : *fields) {
+        if (field == nullptr)
+            continue;
+
+        const auto& envelope = CEnvelopeTypeShape(*field);
+        depth = std::max(depth, envelope.Depth());
+        max_handles = ClampedAdd(max_handles, envelope.MaxHandles());
+        max_out_of_line = ClampedAdd(max_out_of_line, envelope.MaxOutOfLine());
+        array_size = ClampedAdd(array_size, envelope.Size());
+        assert(envelope.Alignment() == 8u);
+    }
+
+    auto pointer_data = TypeShape(
+        array_size, 8u, 1 + depth, max_handles, max_out_of_line);
+
+    auto num_fields = FieldShape(PrimitiveType::Shape(types::PrimitiveSubtype::kUint32));
+    auto pointer_field = FieldShape(PointerTypeShape(pointer_data));
+    std::vector<FieldShape*> header{&num_fields, &pointer_field};
+    return Struct::Shape(&header, extra_handles);
+}
+
 TypeShape XUnion::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles) {
     uint32_t depth = 0u;
     uint32_t max_handles = 0u;
@@ -808,6 +835,7 @@ bool Library::RegisterDecl(Decl* decl) {
     case Decl::Kind::kBits:
     case Decl::Kind::kEnum:
     case Decl::Kind::kStruct:
+    case Decl::Kind::kTable:
     case Decl::Kind::kUnion:
     case Decl::Kind::kXUnion: {
         auto type_decl = static_cast<TypeDecl*>(decl);
@@ -1031,6 +1059,43 @@ bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> s
     return RegisterDecl(struct_declarations_.back().get());
 }
 
+bool Library::ConsumeTableDeclaration(std::unique_ptr<raw::TableDeclaration> table_declaration) {
+    std::vector<Table::Member> members;
+    for (auto& member : table_declaration->members) {
+        if (member->maybe_used) {
+            std::unique_ptr<TypeConstructor> type_ctor;
+            if (!ConsumeTypeConstructor(std::move(member->maybe_used->type_ctor), &type_ctor))
+                return false;
+            std::unique_ptr<Constant> maybe_default_value;
+            if (member->maybe_used->maybe_default_value != nullptr) {
+                // TODO(FIDL-609): Support defaults on tables.
+                const auto default_value = member->maybe_used->maybe_default_value.get();
+                error_reporter_->ReportError(
+                    default_value->location(),
+                    "Defaults on tables are not yet supported.");
+            }
+            if (type_ctor->nullability != types::Nullability::kNonnullable) {
+                return Fail(member->location(), "Table members cannot be nullable");
+            }
+            members.emplace_back(
+                std::move(member->maybe_used->attributes),
+                std::move(member->ordinal),
+                std::move(type_ctor),
+                member->maybe_used->identifier->location(),
+                std::move(maybe_default_value));
+        } else {
+            members.emplace_back(std::move(member->ordinal), member->location());
+        }
+    }
+
+    table_declarations_.push_back(
+        std::make_unique<Table>(
+            std::move(table_declaration->attributes),
+            Name(this, table_declaration->identifier->location()),
+            std::move(members)));
+    return RegisterDecl(table_declarations_.back().get());
+}
+
 bool Library::ConsumeUnionDeclaration(std::unique_ptr<raw::UnionDeclaration> union_declaration) {
     std::vector<Union::Member> members;
     for (auto& member : union_declaration->members) {
@@ -1149,6 +1214,13 @@ bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
     auto struct_declaration_list = std::move(file->struct_declaration_list);
     for (auto& struct_declaration : struct_declaration_list) {
         if (!ConsumeStructDeclaration(std::move(struct_declaration))) {
+            return false;
+        }
+    }
+
+    auto table_declaration_list = std::move(file->table_declaration_list);
+    for (auto& table_declaration : table_declaration_list) {
+        if (!ConsumeTableDeclaration(std::move(table_declaration))) {
             return false;
         }
     }
@@ -1599,6 +1671,20 @@ bool Library::DeclDependencies(Decl* decl, std::set<Decl*>* out_edges) {
         }
         break;
     }
+    case Decl::Kind::kTable: {
+        auto table_decl = static_cast<const Table*>(decl);
+        for (const auto& member : table_decl->members) {
+            if (!member.maybe_used)
+                continue;
+            maybe_add_decl(member.maybe_used->type_ctor.get());
+            if (member.maybe_used->maybe_default_value) {
+                if (!maybe_add_constant(member.maybe_used->type_ctor.get(),
+                                        member.maybe_used->maybe_default_value.get()))
+                    return false;
+            }
+        }
+        break;
+    }
     case Decl::Kind::kUnion: {
         auto union_decl = static_cast<const Union*>(decl);
         for (const auto& member : union_decl->members) {
@@ -1777,6 +1863,12 @@ bool Library::CompileDecl(Decl* decl) {
             return false;
         break;
     }
+    case Decl::Kind::kTable: {
+        auto table_decl = static_cast<Table*>(decl);
+        if (!CompileTable(table_decl))
+            return false;
+        break;
+    }
     case Decl::Kind::kUnion: {
         auto union_decl = static_cast<Union*>(decl);
         if (!CompileUnion(union_decl))
@@ -1847,6 +1939,25 @@ bool Library::VerifyDeclAttributes(Decl* decl) {
         if (placement_ok.NoNewErrors()) {
             ValidateAttributesConstraints(
                 struct_decl, struct_decl->attributes.get());
+        }
+        break;
+    }
+    case Decl::Kind::kTable: {
+        auto table_decl = static_cast<Table*>(decl);
+        ValidateAttributesPlacement(
+            AttributeSchema::Placement::kTableDecl,
+            table_decl->attributes.get());
+        for (const auto& member : table_decl->members) {
+            if (member.maybe_used) {
+                ValidateAttributesPlacement(
+                    AttributeSchema::Placement::kTableMember,
+                    member.maybe_used->attributes.get());
+            }
+        }
+        if (placement_ok.NoNewErrors()) {
+            ValidateAttributesConstraints(
+                table_decl,
+                table_decl->attributes.get());
         }
         break;
     }
@@ -2040,6 +2151,53 @@ bool Library::CompileStruct(Struct* struct_declaration) {
 
     struct_declaration->typeshape = Struct::Shape(&fidl_struct, max_member_handles);
 
+    return true;
+}
+
+bool Library::CompileTable(Table* table_decl) {
+    Scope<StringView> name_scope;
+    Scope<uint32_t> ordinal_scope;
+    for (auto& member : table_decl->members) {
+        auto ordinal_result = ordinal_scope.Insert(member.ordinal->value, member.ordinal->location());
+        if (!ordinal_result.ok())
+            return Fail(member.ordinal->location(),
+                        "Multiple table fields with the same ordinal, previous was at " +
+                            ordinal_result.previous_occurrence().position());
+        if (member.maybe_used) {
+            auto name_result = name_scope.Insert(member.maybe_used->name.data(), member.maybe_used->name);
+            if (!name_result.ok())
+                return Fail(member.maybe_used->name,
+                            "Multiple table fields with the same name; previous was at " +
+                                name_result.previous_occurrence().position());
+            if (!CompileTypeConstructor(member.maybe_used->type_ctor.get(), &member.maybe_used->typeshape))
+                return false;
+        }
+    }
+
+    uint32_t last_ordinal_seen = 0;
+    for (const auto& ordinal_and_location : ordinal_scope) {
+        if (ordinal_and_location.first != last_ordinal_seen + 1) {
+            return Fail(ordinal_and_location.second,
+                        "Missing ordinal (table ordinals do not form a dense space)");
+        }
+        last_ordinal_seen = ordinal_and_location.first;
+    }
+
+    uint32_t max_member_handles = 0;
+    if (table_decl->recursive) {
+        max_member_handles = std::numeric_limits<uint32_t>::max();
+    } else {
+        max_member_handles = 0;
+    }
+
+    std::vector<TypeShape*> fields(table_decl->members.size());
+    for (auto& member : table_decl->members) {
+        if (member.maybe_used) {
+            fields[member.ordinal->value - 1] = &member.maybe_used->typeshape;
+        }
+    }
+
+    table_decl->typeshape = Table::Shape(&fields, max_member_handles);
     return true;
 }
 

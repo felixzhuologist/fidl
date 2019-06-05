@@ -435,6 +435,44 @@ void JSONGenerator::Generate(const flat::Struct::Member& value) {
     });
 }
 
+void JSONGenerator::Generate(const flat::Table& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        GenerateObjectMember("location", NameLocation(value.name));
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+        GenerateObjectMember("members", value.members);
+        GenerateObjectMember("size", value.typeshape.Size());
+        GenerateObjectMember("max_out_of_line", value.typeshape.MaxOutOfLine());
+        GenerateObjectMember("alignment", value.typeshape.Alignment());
+        GenerateObjectMember("max_handles", value.typeshape.MaxHandles());
+    });
+}
+
+void JSONGenerator::Generate(const flat::Table::Member& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("ordinal", *value.ordinal, Position::kFirst);
+        if (value.maybe_used) {
+            assert(!value.maybe_location);
+            GenerateObjectMember("reserved", false);
+            GenerateObjectMember("type", value.maybe_used->type_ctor->type);
+            GenerateObjectMember("name", value.maybe_used->name);
+            GenerateObjectMember("location", NameLocation(value.maybe_used->name));
+            if (value.maybe_used->attributes)
+                GenerateObjectMember("maybe_attributes", value.maybe_used->attributes);
+            // TODO(FIDL-609): Support defaults on tables.
+            GenerateObjectMember("size", value.maybe_used->typeshape.Size());
+            GenerateObjectMember("max_out_of_line", value.maybe_used->typeshape.MaxOutOfLine());
+            GenerateObjectMember("alignment", value.maybe_used->typeshape.Alignment());
+            GenerateObjectMember("max_handles", value.maybe_used->typeshape.MaxHandles());
+        } else {
+            assert(value.maybe_location);
+            GenerateObjectMember("reserved", true);
+            GenerateObjectMember("location", NameLocation(*value.maybe_location));
+        }
+    });
+}
+
 void JSONGenerator::Generate(const flat::Union& value) {
     GenerateObject([&]() {
         GenerateObjectMember("name", value.name, Position::kFirst);
@@ -563,6 +601,7 @@ std::ostringstream JSONGenerator::Produce() {
         GenerateObjectMember("const_declarations", library_->const_declarations_);
         GenerateObjectMember("enum_declarations", library_->enum_declarations_);
         GenerateObjectMember("struct_declarations", library_->struct_declarations_);
+        GenerateObjectMember("table_declarations", library_->table_declarations_);
         GenerateObjectMember("union_declarations", library_->union_declarations_);
         GenerateObjectMember("xunion_declarations", library_->xunion_declarations_);
 

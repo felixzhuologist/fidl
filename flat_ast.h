@@ -415,6 +415,7 @@ struct Decl {
         kBits,
         kEnum,
         kStruct,
+        kTable,
         kUnion,
         kXUnion,
     };
@@ -708,6 +709,55 @@ struct Struct : public TypeDecl {
     static TypeShape Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles = 0u);
 };
 
+struct Table : public TypeDecl {
+    struct Member {
+        Member(std::unique_ptr<raw::AttributeList> attributes,
+               std::unique_ptr<raw::Ordinal> ordinal,
+               std::unique_ptr<TypeConstructor> type_ctor,
+               SourceLocation name,
+               std::unique_ptr<Constant> maybe_default_value)
+            : ordinal(std::move(ordinal)),
+              maybe_used(std::make_unique<Used>(
+                std::move(attributes),
+                std::move(type_ctor),
+                std::move(name),
+                std::move(maybe_default_value))) {}
+
+        Member(std::unique_ptr<raw::Ordinal> ordinal, SourceLocation location)
+            : ordinal(std::move(ordinal)),
+              maybe_location(std::make_unique<SourceLocation>(location)) {}
+
+        std::unique_ptr<raw::Ordinal> ordinal;
+        // location for reserved table members?
+        std::unique_ptr<SourceLocation> maybe_location;
+        struct Used {
+            Used(std::unique_ptr<raw::AttributeList> attributes,
+                 std::unique_ptr<TypeConstructor> type_ctor,
+                 SourceLocation name,
+                 std::unique_ptr<Constant> maybe_default_value)
+                : attributes(std::move(attributes)),
+                  type_ctor(std::move(type_ctor)),
+                  name(std::move(name)),
+                  maybe_default_value(std::move(maybe_default_value)) {}
+
+            std::unique_ptr<raw::AttributeList> attributes;
+            std::unique_ptr<TypeConstructor> type_ctor;
+            SourceLocation name;
+            std::unique_ptr<Constant> maybe_default_value;
+            TypeShape typeshape;
+        };
+        std::unique_ptr<Used> maybe_used;
+    };
+
+    Table(std::unique_ptr<raw::AttributeList> attributes, Name name, std::vector<Member> members)
+        : TypeDecl(Kind::kTable, std::move(attributes), std::move(name)),
+          members(std::move(members)) {}
+
+    std::vector<Member> members;
+
+    static TypeShape Shape(std::vector<TypeShape*>* fields, uint32_t extra_handles = 0u);
+};
+
 struct Union : public TypeDecl {
     struct Member {
         Member(std::unique_ptr<raw::AttributeList> attributes,
@@ -859,6 +909,8 @@ public:
         kEnumMember,
         kStructDecl,
         kStructMember,
+        kTableDecl,
+        kTableMember,
         kUnionDecl,
         kUnionMember,
         kXUnionDecl,
@@ -972,6 +1024,7 @@ public:
     std::vector<std::unique_ptr<Bits>> bits_declarations_;
     std::vector<std::unique_ptr<Enum>> enum_declarations_;
     std::vector<std::unique_ptr<Struct>> struct_declarations_;
+    std::vector<std::unique_ptr<Table>> table_declarations_;
     std::vector<std::unique_ptr<Union>> union_declarations_;
     std::vector<std::unique_ptr<XUnion>> xunion_declarations_;
 
@@ -1009,6 +1062,7 @@ private:
     bool ConsumeBitsDeclaration(std::unique_ptr<raw::BitsDeclaration> bits_declaration);
     bool ConsumeEnumDeclaration(std::unique_ptr<raw::EnumDeclaration> enum_declaration);
     bool ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration);
+    bool ConsumeTableDeclaration(std::unique_ptr<raw::TableDeclaration> table_declaration);
     bool ConsumeUnionDeclaration(std::unique_ptr<raw::UnionDeclaration> union_declaration);
     bool ConsumeXUnionDeclaration(std::unique_ptr<raw::XUnionDeclaration> xunion_declaration);
 
@@ -1029,6 +1083,7 @@ private:
     bool CompileBits(Bits* bits_declaration);
     bool CompileEnum(Enum* enum_declaration);
     bool CompileStruct(Struct* struct_declaration);
+    bool CompileTable(Table* table_declaration);
     bool CompileUnion(Union* union_declaration);
     bool CompileXUnion(XUnion* xunion_declaration);
 

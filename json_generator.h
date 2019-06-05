@@ -80,6 +80,8 @@ private:
     void Generate(const flat::Enum::Member& value);
     void Generate(const flat::Struct& value);
     void Generate(const flat::Struct::Member& value);
+    void Generate(const flat::Table& value);
+    void Generate(const flat::Table::Member& value);
     void Generate(const flat::Union& value);
     void Generate(const flat::Union::Member& value);
     void Generate(const flat::XUnion& value);

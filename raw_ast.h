@@ -387,6 +387,64 @@ public:
     std::vector<std::unique_ptr<StructMember>> members;
 };
 
+struct TableMember final : public SourceElement {
+    TableMember(SourceElement const& element,
+                std::unique_ptr<AttributeList> attributes,
+                std::unique_ptr<Ordinal> ordinal,
+                std::unique_ptr<TypeConstructor> type_ctor,
+                std::unique_ptr<Identifier> identifier,
+                std::unique_ptr<Constant> maybe_default_value)
+        : SourceElement(element),
+          ordinal(std::move(ordinal)),
+          maybe_used(std::make_unique<Used>(
+            std::move(attributes),
+            std::move(type_ctor),
+            std::move(identifier),
+            std::move(maybe_default_value))) {}
+
+    TableMember(SourceElement const& element, std::unique_ptr<Ordinal> ordinal)
+        : SourceElement(element), ordinal(std::move(ordinal)) {}
+
+    void Accept(TreeVisitor* visitor) const;
+
+    std::unique_ptr<Ordinal> ordinal;
+    // A used member is not 'reserved'
+    struct Used {
+        Used(std::unique_ptr<AttributeList> attributes,
+             std::unique_ptr<TypeConstructor> type_ctor,
+             std::unique_ptr<Identifier> identifier,
+             std::unique_ptr<Constant> maybe_default_value)
+            : attributes(std::move(attributes)),
+              type_ctor(std::move(type_ctor)),
+              identifier(std::move(identifier)),
+              maybe_default_value(std::move(maybe_default_value)) {}
+
+        std::unique_ptr<AttributeList> attributes;
+        std::unique_ptr<TypeConstructor> type_ctor;
+        std::unique_ptr<Identifier> identifier;
+        std::unique_ptr<Constant> maybe_default_value;
+    };
+    std::unique_ptr<Used> maybe_used;
+};
+
+class TableDeclaration final : public SourceElement {
+public:
+    TableDeclaration(SourceElement const& element,
+                    std::unique_ptr<AttributeList> attributes,
+                    std::unique_ptr<Identifier> identifier,
+                    std::vector<std::unique_ptr<TableMember>> members)
+        : SourceElement(element),
+          attributes(std::move(attributes)),
+          identifier(std::move(identifier)),
+          members(std::move(members)) {}
+
+    void Accept(TreeVisitor* visitor) const;
+
+    std::unique_ptr<AttributeList> attributes;
+    std::unique_ptr<Identifier> identifier;
+    std::vector<std::unique_ptr<TableMember>> members;
+};
+
 class UnionMember final : public SourceElement {
 public:
     UnionMember(SourceElement const& element,
@@ -470,6 +528,7 @@ public:
          std::vector<std::unique_ptr<BitsDeclaration>> bits_declaration_list,
          std::vector<std::unique_ptr<EnumDeclaration>> enum_declaration_list,
          std::vector<std::unique_ptr<StructDeclaration>> struct_declaration_list,
+         std::vector<std::unique_ptr<TableDeclaration>> table_declaration_list,
          std::vector<std::unique_ptr<UnionDeclaration>> union_declaration_list,
          std::vector<std::unique_ptr<XUnionDeclaration>> xunion_declaration_list)
         : SourceElement(element),
@@ -480,6 +539,7 @@ public:
           bits_declaration_list(std::move(bits_declaration_list)),
           enum_declaration_list(std::move(enum_declaration_list)),
           struct_declaration_list(std::move(struct_declaration_list)),
+          table_declaration_list(std::move(table_declaration_list)),
           union_declaration_list(std::move(union_declaration_list)),
           xunion_declaration_list(std::move(xunion_declaration_list)),
           end_(end) {}
@@ -493,6 +553,7 @@ public:
     std::vector<std::unique_ptr<BitsDeclaration>> bits_declaration_list;
     std::vector<std::unique_ptr<EnumDeclaration>> enum_declaration_list;
     std::vector<std::unique_ptr<StructDeclaration>> struct_declaration_list;
+    std::vector<std::unique_ptr<TableDeclaration>> table_declaration_list;
     std::vector<std::unique_ptr<UnionDeclaration>> union_declaration_list;
     std::vector<std::unique_ptr<XUnionDeclaration>> xunion_declaration_list;
     Token end_;

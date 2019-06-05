@@ -1,3 +1,5 @@
+#include <errno.h>
+
 #include "attributes.h"
 #include "parser.h"
 
@@ -123,6 +125,30 @@ std::unique_ptr<raw::Literal> Parser::ParseLiteral() {
     default:
         return Fail();
     }
+}
+
+std::unique_ptr<raw::Ordinal> Parser::ParseOrdinal() {
+    ASTScope scope(this);
+
+    ConsumeToken(OfKind(Token::Kind::kNumericLiteral));
+    if (!Ok())
+        return Fail();
+    auto data = scope.GetSourceElement().location().data();
+    std::string string_data(data.data(), data.data() + data.size());
+    errno = 0;
+    unsigned long long value = strtoull(string_data.data(), nullptr, 0);
+    assert(errno == 0 && "Unparsable number should not be lexed.");
+    if (value > std::numeric_limits<uint32_t>::max())
+        return Fail("Ordinal out-of-bound");
+    uint32_t ordinal = static_cast<uint32_t>(value);
+    if (ordinal == 0u)
+        return Fail("Fidl ordinals cannot be 0");
+
+    ConsumeToken(OfKind(Token::Kind::kColon));
+    if (!Ok())
+        return Fail();
+
+    return std::make_unique<raw::Ordinal>(scope.GetSourceElement(), ordinal);
 }
 
 std::unique_ptr<raw::Attribute> Parser::ParseAttribute() {
@@ -588,6 +614,93 @@ Parser::ParseStructDeclaration(std::unique_ptr<raw::AttributeList> attributes, A
         scope.GetSourceElement(), std::move(attributes), std::move(identifier), std::move(members));
 }
 
+std::unique_ptr<raw::TableMember>
+Parser::ParseTableMember() {
+    ASTScope scope(this);
+    auto attributes = MaybeParseAttributeList();
+    if (!Ok())
+        return Fail();
+
+    auto ordinal = ParseOrdinal();
+    if (!Ok())
+        return Fail();
+
+    if (MaybeConsumeToken(IdentifierOfSubkind(Token::Subkind::kReserved))) {
+        if (!Ok())
+            return Fail();
+        if (attributes != nullptr)
+            return Fail("Cannot attach attributes to reserved ordinals");
+        return std::make_unique<raw::TableMember>(scope.GetSourceElement(), std::move(ordinal));     
+    }
+
+    auto type_ctor = ParseTypeConstructor();
+    if (!Ok())
+        return Fail();
+    auto identifier = ParseIdentifier();
+    if (!Ok())
+        return Fail();
+
+    std::unique_ptr<raw::Constant> maybe_default_value;
+    if (MaybeConsumeToken(OfKind(Token::Kind::kEqual))) {
+        if (!Ok())
+            return Fail();
+        maybe_default_value = ParseConstant();
+        if (!Ok())
+            return Fail();
+    }
+
+    return std::make_unique<raw::TableMember>(
+        scope.GetSourceElement(),
+        std::move(attributes),
+        std::move(ordinal),
+        std::move(type_ctor),
+        std::move(identifier),
+        std::move(maybe_default_value));
+}
+
+std::unique_ptr<raw::TableDeclaration>
+Parser::ParseTableDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope) {
+    std::vector<std::unique_ptr<raw::TableMember>> members;
+
+    ConsumeToken(IdentifierOfSubkind(Token::Subkind::kTable));
+    if (!Ok())
+        return Fail();
+
+    auto identifier = ParseIdentifier();
+    if (!Ok())
+        return Fail();
+
+    ConsumeToken(OfKind(Token::Kind::kLeftCurly));
+    if (!Ok())
+        return Fail();
+
+    auto parse_member = [&members, this]() {
+        if (Peek().kind() == Token::Kind::kRightCurly) {
+            ConsumeToken(OfKind(Token::Kind::kRightCurly));
+            return Done;
+        } else {
+            members.emplace_back(ParseTableMember());
+            return More;
+        }
+    };
+
+    while (parse_member() == More) {
+        if (!Ok())
+            return Fail();
+        ConsumeToken(OfKind(Token::Kind::kSemicolon));
+        if (!Ok())
+            return Fail();
+    }
+    if (!Ok())
+        return Fail();
+
+    return std::make_unique<raw::TableDeclaration>(
+        scope.GetSourceElement(),
+        std::move(attributes),
+        std::move(identifier),
+        std::move(members));
+}
+
 std::unique_ptr<raw::UnionMember> Parser::ParseUnionMember() {
     ASTScope scope(this);
     auto attributes = MaybeParseAttributeList();
@@ -725,6 +838,7 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
     std::vector<std::unique_ptr<raw::BitsDeclaration>> bits_declaration_list;
     std::vector<std::unique_ptr<raw::EnumDeclaration>> enum_declaration_list;
     std::vector<std::unique_ptr<raw::StructDeclaration>> struct_declaration_list;
+    std::vector<std::unique_ptr<raw::TableDeclaration>> table_declaration_list;
     std::vector<std::unique_ptr<raw::UnionDeclaration>> union_declaration_list;
     std::vector<std::unique_ptr<raw::XUnionDeclaration>> xunion_declaration_list;
 
@@ -770,6 +884,7 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
                        &bits_declaration_list,
                        &enum_declaration_list,
                        &struct_declaration_list,
+                       &table_declaration_list,
                        &union_declaration_list,
                        &xunion_declaration_list,
                        this]() {
@@ -806,6 +921,10 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
             struct_declaration_list.emplace_back(ParseStructDeclaration(std::move(attributes), scope));
             return More;
 
+        case CASE_IDENTIFIER(Token::Subkind::kTable):
+            table_declaration_list.emplace_back(ParseTableDeclaration(std::move(attributes), scope));
+            return More;
+
         case CASE_IDENTIFIER(Token::Subkind::kUnion):
             union_declaration_list.emplace_back(ParseUnionDeclaration(std::move(attributes), scope));
             return More;
@@ -838,6 +957,7 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
         std::move(bits_declaration_list),
         std::move(enum_declaration_list),
         std::move(struct_declaration_list),
+        std::move(table_declaration_list),
         std::move(union_declaration_list),
         std::move(xunion_declaration_list));
 }
