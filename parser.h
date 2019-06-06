@@ -179,6 +179,24 @@ private:
     std::unique_ptr<raw::EnumDeclaration>
     ParseEnumDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
 
+    std::unique_ptr<raw::Parameter> ParseParameter();
+    std::unique_ptr<raw::ParameterList> ParseParameterList();
+    std::unique_ptr<raw::InterfaceMethod> ParseProtocolEvent(
+        std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope,
+        std::unique_ptr<raw::Ordinal> ordinal);
+    std::unique_ptr<raw::InterfaceMethod> ParseProtocolMethod(
+        std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope,
+        std::unique_ptr<raw::Ordinal> ordinal,
+        std::unique_ptr<raw::Identifier> method_name);
+    // ParseProtocolMember parses any one protocol member, i.e. an event,
+    // a method, or a compose stanza.
+    void ParseProtocolMember(
+        std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope,
+        std::vector<std::unique_ptr<raw::ComposeProtocol>>* composed_protocols,
+        std::vector<std::unique_ptr<raw::InterfaceMethod>>* methods);
+    std::unique_ptr<raw::InterfaceDeclaration>
+    ParseProtocolDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
+
     std::unique_ptr<raw::StructMember> ParseStructMember();
     std::unique_ptr<raw::StructDeclaration>
     ParseStructDeclaration(std::unique_ptr<raw::AttributeList> attributes, ASTScope&);

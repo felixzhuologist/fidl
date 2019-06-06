@@ -14,6 +14,7 @@
 #include "error_reporter.h"
 #include "raw_ast.h"
 #include "typeshape.h"
+#include "virtual_source_file.h"
 
 namespace fidl {
 namespace flat {
@@ -27,6 +28,8 @@ struct PtrCompare {
 class Typespace;
 struct Decl;
 class Library;
+
+bool HasSimpleLayout(const Decl* decl);
 
 std::string LibraryName(const Library* library, StringView separator);
 
@@ -46,6 +49,11 @@ struct Name {
 
     bool is_anonymous() const { return name_from_source_ == nullptr; }
     const Library* library() const { return library_; }
+    const SourceLocation* maybe_location() const {
+        if (is_anonymous())
+            return nullptr;
+        return name_from_source_.get();
+    }
     const SourceLocation& source_location() const {
         return *name_from_source_.get();
     }
@@ -414,6 +422,7 @@ struct Decl {
         kConst,
         kBits,
         kEnum,
+        kInterface,
         kStruct,
         kTable,
         kUnion,
@@ -427,6 +436,8 @@ struct Decl {
 
     std::unique_ptr<raw::AttributeList> attributes;
     const Name name;
+
+    bool HasAttribute(std::string_view name) const;
 
     std::string GetName() const;
 
@@ -448,6 +459,7 @@ struct Type {
         kArray,
         kVector,
         kString,
+        kHandle,
         kPrimitive,
         kIdentifier,
     };
@@ -556,6 +568,19 @@ struct StringType : public Type {
     static TypeShape Shape(uint32_t max_length);
 };
 
+// TODO: complete this when handle subtypes are added
+struct HandleType : public Type {
+    HandleType(types::Nullability nullability)
+        : Type(Kind::kHandle, nullability, Shape()) {}
+
+    Comparison Compare(const Type& other) const override {
+        const auto& o = *static_cast<const HandleType*>(&other);
+        return Type::Compare(o);
+    }
+
+    static TypeShape Shape();
+};
+
 struct PrimitiveType : public Type {
 
     explicit PrimitiveType(types::PrimitiveSubtype subtype)
@@ -593,10 +618,14 @@ struct IdentifierType : public Type {
 };
 
 struct TypeConstructor {
-    TypeConstructor(Name name, std::unique_ptr<TypeConstructor> maybe_arg_type_ctor,
-               std::unique_ptr<Constant> maybe_size, types::Nullability nullability)
-        : name(std::move(name)), maybe_arg_type_ctor(std::move(maybe_arg_type_ctor)),
-          maybe_size(std::move(maybe_size)), nullability(nullability) {}
+    TypeConstructor(Name name,
+                    std::unique_ptr<TypeConstructor> maybe_arg_type_ctor,
+                    std::unique_ptr<Constant> maybe_size,
+                    types::Nullability nullability)
+        : name(std::move(name)),
+          maybe_arg_type_ctor(std::move(maybe_arg_type_ctor)),
+          maybe_size(std::move(maybe_size)),
+          nullability(nullability) {}
 
     // Set during construction.
     const Name name;
@@ -810,6 +839,58 @@ struct XUnion : public TypeDecl {
     static TypeShape Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles = 0u);
 };
 
+struct Interface : public TypeDecl {
+    struct Method {
+        Method(Method&&) = default;
+        Method& operator=(Method&&) = default;
+
+        Method(std::unique_ptr<raw::AttributeList> attributes,
+               std::unique_ptr<raw::Ordinal> ordinal,
+               std::unique_ptr<raw::Ordinal> generated_ordinal,
+               SourceLocation name,
+               Struct* maybe_request,
+               Struct* maybe_response)
+            : attributes(std::move(attributes)),
+              ordinal(std::move(ordinal)),
+              generated_ordinal(std::move(generated_ordinal)),
+              name(std::move(name)),
+              maybe_request(maybe_request),
+              maybe_response(maybe_response) {
+            assert(this->maybe_request != nullptr || this->maybe_response != nullptr);
+        }
+
+        std::unique_ptr<raw::AttributeList> attributes;
+        std::unique_ptr<raw::Ordinal> ordinal;
+        // what is this even used for?
+        std::unique_ptr<raw::Ordinal> generated_ordinal;
+        SourceLocation name;
+        Struct* maybe_request;
+        Struct* maybe_response;
+        // gets set to the Interface instance that owns this Method when that
+        // interface gets constructed
+        Interface* owning_interface = nullptr;
+    };
+
+    Interface(std::unique_ptr<raw::AttributeList> attributes,
+              Name name,
+              std::set<Name> superinterfaces,
+              std::vector<Method> methods)
+        : TypeDecl(Kind::kInterface, std::move(attributes), std::move(name)),
+          superinterfaces(std::move(superinterfaces)),
+          methods(std::move(methods)) {
+        for (auto& method : this->methods) {
+            method.owning_interface = this;
+        }
+    }
+
+    std::set<Name> superinterfaces;
+    // only contains this interface's own methods
+    std::vector<Method> methods;
+    // contains all methods include those from superinterfaces (which are set
+    // after they get compiled, and remain owned by the superinterface)
+    std::vector<const Method*> all_methods;
+};
+
 class TypeTemplate {
 public:
     TypeTemplate(Name name, Typespace* typespace, ErrorReporter* error_reporter)
@@ -907,6 +988,8 @@ public:
         kBitsMember,
         kEnumDecl,
         kEnumMember,
+        kInterfaceDecl,
+        kMethod,
         kStructDecl,
         kStructMember,
         kTableDecl,
@@ -1023,6 +1106,7 @@ public:
     std::vector<std::unique_ptr<Const>> const_declarations_;
     std::vector<std::unique_ptr<Bits>> bits_declarations_;
     std::vector<std::unique_ptr<Enum>> enum_declarations_;
+    std::vector<std::unique_ptr<Interface>> interface_declarations_;
     std::vector<std::unique_ptr<Struct>> struct_declarations_;
     std::vector<std::unique_ptr<Table>> table_declarations_;
     std::vector<std::unique_ptr<Union>> union_declarations_;
@@ -1044,6 +1128,13 @@ private:
     void ValidateAttributesPlacement(AttributeSchema::Placement placement,
                                      const raw::AttributeList* attributes);
 
+    SourceLocation GeneratedSimpleName(const std::string& name);
+    // get a name guaranteed to be unique within the library
+    Name NextAnonymousName();
+    // get a derived name from the concatenated components using underscores as
+    // delimiters
+    Name DerivedName(const std::vector<StringView>& components);
+    
     bool CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
                                    Name* out_name);
     void RegisterConst(Const* decl);
@@ -1061,6 +1152,14 @@ private:
     bool ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> const_declaration);
     bool ConsumeBitsDeclaration(std::unique_ptr<raw::BitsDeclaration> bits_declaration);
     bool ConsumeEnumDeclaration(std::unique_ptr<raw::EnumDeclaration> enum_declaration);
+    bool ConsumeInterfaceDeclaration(std::unique_ptr<raw::InterfaceDeclaration> interface_declaration);
+    // write out possibly anonymous struct to represent the maybe request/response of
+    // a method
+    bool ConsumeParameterList(Name name, std::unique_ptr<raw::ParameterList> parameter_list,
+                              bool anonymous, Struct** out_struct_decl);
+    // takes in a response struct type of a successful response, then creates a response
+    // struct type that contains a union of the successful response type or the error type
+    bool CreateMethodResult(const Name& interface_name, raw::InterfaceMethod* method, Struct* in_response, Struct** out_response);
     bool ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration);
     bool ConsumeTableDeclaration(std::unique_ptr<raw::TableDeclaration> table_declaration);
     bool ConsumeUnionDeclaration(std::unique_ptr<raw::UnionDeclaration> union_declaration);
@@ -1069,6 +1168,7 @@ private:
     bool TypeCanBeConst(const Type* type);
     const Type* TypeResolve(const Type* type);
     bool TypeIsConvertibleTo(const Type* from_type, const Type* to_type);
+    std::unique_ptr<TypeConstructor> IdentifierTypeForDecl(const Decl* decl, types::Nullability nullability);
 
     // return the declaration corresponding to name.
     Decl* LookupConstant(const TypeConstructor* type_ctor, const Name& name);
@@ -1082,6 +1182,7 @@ private:
     bool CompileConst(Const* const_declaration);
     bool CompileBits(Bits* bits_declaration);
     bool CompileEnum(Enum* enum_declaration);
+    bool CompileInterface(Interface* interface_declaration);
     bool CompileStruct(Struct* struct_declaration);
     bool CompileTable(Table* table_declaration);
     bool CompileUnion(Union* union_declaration);
@@ -1117,6 +1218,12 @@ private:
 
     ErrorReporter* error_reporter_;
     Typespace* typespace_;
+
+    // counter that is included in generated anonymous names to ensure uniqueness
+    uint32_t anon_counter_ = 0;
+    // a virtual file to store generated names. it is not used directly but
+    // rather serves as a backing to the Name objects
+    VirtualSourceFile generated_source_file_{"generated"};
 };
 
 } // namespace flat

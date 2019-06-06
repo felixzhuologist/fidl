@@ -12,7 +12,7 @@ namespace fidl {
 class SourceFile {
 public:
     SourceFile(std::string filename, std::string data);
-    // virtual ~SourceFile();
+    virtual ~SourceFile() = default;
 
     StringView filename() const { return filename_; }
     StringView data() const { return data_; }
@@ -24,7 +24,7 @@ public:
 
     // return the entire line containing the given stringview, and write out
     // its position into position_out. fails if view is not a part of this source file
-    StringView LineContaining(StringView view, Position* position_out) const;
+    virtual StringView LineContaining(StringView view, Position* position_out) const;
 
 private:
     std::string filename_;

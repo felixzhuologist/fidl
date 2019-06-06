@@ -140,6 +140,57 @@ void EnumDeclaration::Accept(TreeVisitor* visitor) const {
     }
 }
 
+void Parameter::Accept(TreeVisitor* visitor) const {
+    SourceElementMark sem(visitor, *this);
+    visitor->OnTypeConstructor(type_ctor);
+    visitor->OnIdentifier(identifier);
+}
+
+void ParameterList::Accept(TreeVisitor* visitor) const {
+    SourceElementMark sem(visitor, *this);
+    for (auto const& parameter : parameter_list) {
+        visitor->OnParameter(parameter);
+    }
+}
+
+void InterfaceMethod::Accept(TreeVisitor* visitor) const {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor->OnAttributeList(attributes);
+    }
+    if (ordinal != nullptr) {
+        visitor->OnOrdinal(*ordinal);
+    }
+    if (maybe_request != nullptr) {
+        visitor->OnParameterList(maybe_request);
+    }
+    if (maybe_response != nullptr) {
+        visitor->OnParameterList(maybe_response);
+    }
+    if (maybe_error_ctor != nullptr) {
+        visitor->OnTypeConstructor(maybe_error_ctor);
+    }
+}
+
+void ComposeProtocol::Accept(TreeVisitor *visitor) const {
+    SourceElementMark sem(visitor, *this);
+    visitor->OnCompoundIdentifier(protocol_name);
+}
+
+void InterfaceDeclaration::Accept(TreeVisitor *visitor) const {
+    SourceElementMark sem(visitor, *this);
+    if (attributes != nullptr) {
+        visitor->OnAttributeList(attributes);
+    }
+    visitor->OnIdentifier(identifier);
+    for (auto const& superinterface : superinterfaces) {
+        visitor->OnComposeProtocol(superinterface);
+    }
+    for (auto const& method : methods) {
+        visitor->OnInterfaceMethod(method);
+    }
+}
+
 void StructMember::Accept(TreeVisitor* visitor) const {
     SourceElementMark sem(visitor, *this);
     if (attributes != nullptr) {
@@ -255,6 +306,9 @@ void File::Accept(TreeVisitor* visitor) const {
     }
     for (auto& i : enum_declaration_list) {
         visitor->OnEnumDeclaration(i);
+    }
+    for (auto& i : interface_declaration_list) {
+        visitor->OnInterfaceDeclaration(i);
     }
     for (auto& i : struct_declaration_list) {
         visitor->OnStructDeclaration(i);

@@ -348,6 +348,93 @@ public:
     std::vector<std::unique_ptr<EnumMember>> members;
 };
 
+class Parameter final : public SourceElement {
+public:
+    Parameter(SourceElement const& element,
+              std::unique_ptr<TypeConstructor> type_ctor,
+              std::unique_ptr<Identifier> identifier)
+        : SourceElement(element),
+          type_ctor(std::move(type_ctor)),
+          identifier(std::move(identifier)) {}
+
+    void Accept(TreeVisitor* visitor) const;
+
+    std::unique_ptr<TypeConstructor> type_ctor;
+    std::unique_ptr<Identifier> identifier;
+};
+
+class ParameterList final : public SourceElement {
+public:
+    ParameterList(SourceElement const& element,
+                  std::vector<std::unique_ptr<Parameter>> parameter_list)
+        : SourceElement(element), parameter_list(std::move(parameter_list)) {}
+
+    void Accept(TreeVisitor* visitor) const;
+
+    std::vector<std::unique_ptr<Parameter>> parameter_list;
+};
+
+class InterfaceMethod final : public SourceElement {
+public:
+    InterfaceMethod(SourceElement const& element,
+                    std::unique_ptr<AttributeList> attributes,
+                    std::unique_ptr<Ordinal> ordinal,
+                    std::unique_ptr<Identifier> identifier,
+                    std::unique_ptr<ParameterList> maybe_request,
+                    std::unique_ptr<ParameterList> maybe_response,
+                    std::unique_ptr<TypeConstructor> maybe_error_ctor)
+        : SourceElement(element),
+          attributes(std::move(attributes)),
+          ordinal(std::move(ordinal)),
+          identifier(std::move(identifier)),
+          maybe_request(std::move(maybe_request)),
+          maybe_response(std::move(maybe_response)),
+          maybe_error_ctor(std::move(maybe_error_ctor)) {}
+
+    void Accept(TreeVisitor* visitor) const;
+
+    std::unique_ptr<AttributeList> attributes;
+    // why is this here?
+    std::unique_ptr<Ordinal> ordinal;
+    std::unique_ptr<Identifier> identifier;
+    std::unique_ptr<ParameterList> maybe_request;
+    std::unique_ptr<ParameterList> maybe_response;
+    std::unique_ptr<TypeConstructor> maybe_error_ctor;
+};
+
+class ComposeProtocol final : public SourceElement {
+public:
+    ComposeProtocol(SourceElement const& element,
+                    std::unique_ptr<CompoundIdentifier> protocol_name)
+        : SourceElement(element), protocol_name(std::move(protocol_name)) {}
+
+    void Accept(TreeVisitor* visitor) const;
+
+    std::unique_ptr<CompoundIdentifier> protocol_name;
+};
+
+class InterfaceDeclaration final : public SourceElement {
+public:
+    InterfaceDeclaration(
+        SourceElement const& element,
+        std::unique_ptr<AttributeList> attributes,
+        std::unique_ptr<Identifier> identifier,
+        std::vector<std::unique_ptr<ComposeProtocol>> superinterfaces,
+        std::vector<std::unique_ptr<InterfaceMethod>> methods)
+        : SourceElement(element),
+          attributes(std::move(attributes)),
+          identifier(std::move(identifier)),
+          superinterfaces(std::move(superinterfaces)),
+          methods(std::move(methods)) {}
+
+    void Accept(TreeVisitor* visitor) const;
+
+    std::unique_ptr<AttributeList> attributes;
+    std::unique_ptr<Identifier> identifier;
+    std::vector<std::unique_ptr<ComposeProtocol>> superinterfaces;
+    std::vector<std::unique_ptr<InterfaceMethod>> methods;
+};
+
 class StructMember final : public SourceElement {
 public:
     StructMember(SourceElement const& element,
@@ -527,6 +614,7 @@ public:
          std::vector<std::unique_ptr<ConstDeclaration>> const_declaration_list,
          std::vector<std::unique_ptr<BitsDeclaration>> bits_declaration_list,
          std::vector<std::unique_ptr<EnumDeclaration>> enum_declaration_list,
+         std::vector<std::unique_ptr<InterfaceDeclaration>> interface_declaration_list,
          std::vector<std::unique_ptr<StructDeclaration>> struct_declaration_list,
          std::vector<std::unique_ptr<TableDeclaration>> table_declaration_list,
          std::vector<std::unique_ptr<UnionDeclaration>> union_declaration_list,
@@ -538,6 +626,7 @@ public:
           const_declaration_list(std::move(const_declaration_list)),
           bits_declaration_list(std::move(bits_declaration_list)),
           enum_declaration_list(std::move(enum_declaration_list)),
+          interface_declaration_list(std::move(interface_declaration_list)),
           struct_declaration_list(std::move(struct_declaration_list)),
           table_declaration_list(std::move(table_declaration_list)),
           union_declaration_list(std::move(union_declaration_list)),
@@ -552,6 +641,7 @@ public:
     std::vector<std::unique_ptr<ConstDeclaration>> const_declaration_list;
     std::vector<std::unique_ptr<BitsDeclaration>> bits_declaration_list;
     std::vector<std::unique_ptr<EnumDeclaration>> enum_declaration_list;
+    std::vector<std::unique_ptr<InterfaceDeclaration>> interface_declaration_list;
     std::vector<std::unique_ptr<StructDeclaration>> struct_declaration_list;
     std::vector<std::unique_ptr<TableDeclaration>> table_declaration_list;
     std::vector<std::unique_ptr<UnionDeclaration>> union_declaration_list;

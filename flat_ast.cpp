@@ -37,7 +37,7 @@ uint32_t ClampedAdd(uint32_t a, uint32_t b) {
 
 TypeShape Struct::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles) {
     uint32_t size = 0u;
-    uint32_t alignment = 0u;
+    uint32_t alignment = 1u;
     uint32_t depth = 0u;
     uint32_t max_handles = 0u;
     uint32_t max_out_of_line = 0u;
@@ -232,6 +232,10 @@ TypeShape StringType::Shape(uint32_t max_length) {
     return Struct::Shape(&header, 0);
 }
 
+TypeShape HandleType::Shape() {
+    return TypeShape(4u, 4u, 0u, 1u);
+}
+
 uint32_t PrimitiveType::SubtypeSize(types::PrimitiveSubtype subtype) {
     switch (subtype) {
     case types::PrimitiveSubtype::kBool:
@@ -259,8 +263,53 @@ TypeShape PrimitiveType::Shape(types::PrimitiveSubtype subtype) {
     return TypeShape(SubtypeSize(subtype), SubtypeSize(subtype));
 }
 
+bool Decl::HasAttribute(std::string_view name) const {
+    if (!attributes)
+        return false;
+    return attributes->HasAttribute(std::string(name));
+}
+
 std::string Decl::GetName() const {
     return name.name_part();
+}
+
+bool IsSimple(const Type* type, const FieldShape& fieldshape) {
+    switch (type->kind) {
+    case Type::Kind::kVector: {
+        auto vector_type = static_cast<const VectorType*>(type);
+        if (*vector_type->element_count == Size::Max())
+            return false;
+        switch (vector_type->element_type->kind) {
+        case Type::Kind::kHandle:
+        case Type::Kind::kPrimitive:
+            return true;
+        case Type::Kind::kArray:
+        case Type::Kind::kVector:
+        case Type::Kind::kString:
+        case Type::Kind::kIdentifier:
+            return false;
+        }
+    }
+    case Type::Kind::kString: {
+        auto string_type = static_cast<const StringType*>(type);
+        return *string_type->max_size < Size::Max();
+    }
+    case Type::Kind::kArray:
+    case Type::Kind::kHandle:
+    case Type::Kind::kPrimitive:
+        return fieldshape.Depth() == 0u;
+    case Type::Kind::kIdentifier: {
+        auto identifier_type = static_cast<const IdentifierType*>(type);
+        switch (identifier_type->nullability) {
+        case types::Nullability::kNullable:
+            // If the identifier is nullable, then we can handle a depth of 1
+            // because the secondary object is directly accessible.
+            return fieldshape.Depth() <= 1u;
+        case types::Nullability::kNonnullable:
+            return fieldshape.Depth() == 0u;
+        }
+    }
+    }
 }
 
 bool Typespace::Create(const flat::Name& name,
@@ -608,6 +657,24 @@ void AttributeSchema::ValidateConstraint(ErrorReporter* error_reporter,
     }
 }
 
+bool SimpleLayoutConstraint(ErrorReporter* error_reporter,
+                            const raw::Attribute* attribute,
+                            const Decl* decl) {
+    assert(decl->kind == Decl::Kind::kStruct);
+    auto struct_decl = static_cast<const Struct*>(decl);
+    bool ok = true;
+    for (const auto& member : struct_decl->members) {
+        if (!IsSimple(member.type_ctor.get()->type, member.fieldshape)) {
+            std::string message("member '");
+            message.append(member.name.data());
+            message.append("' is not simple");
+            error_reporter->ReportError(member.name, message);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 bool ParseBound(ErrorReporter* error_reporter, const SourceLocation& location,
                 const std::string& input, uint32_t* out_value) {
     auto result = utils::ParseNumeric(input, out_value, 10);
@@ -658,18 +725,90 @@ bool MaxBytesConstraint(ErrorReporter* error_reporter,
     return true;
 }
 
+// why is this an attribute and not just done during compilation?
+bool ResultShapeConstraint(ErrorReporter* error_reporter,
+                           const raw::Attribute* attribute,
+                           const Decl* decl) {
+    assert(decl->kind == Decl::Kind::kUnion);
+    auto union_decl = static_cast<const Union*>(decl);
+    assert(union_decl->members.size() == 2);
+    auto error_type = union_decl->members.at(1).type_ctor->type;
+
+    const PrimitiveType* error_primitive = nullptr;
+    if (error_type->kind == Type::Kind::kPrimitive) {
+        error_primitive = static_cast<const PrimitiveType*>(error_type);
+    } else if (error_type->kind == Type::Kind::kIdentifier) {
+        auto identifier_type = static_cast<const IdentifierType*>(error_type);
+        if (identifier_type->type_decl->kind == Decl::Kind::kEnum) {
+            auto error_enum = static_cast<const Enum*>(identifier_type->type_decl);
+            assert(error_enum->subtype_ctor->type->kind == Type::Kind::kPrimitive);
+            error_primitive = static_cast<const PrimitiveType*>(error_enum->subtype_ctor->type);
+        }
+    }
+
+    if (!error_primitive ||
+        (error_primitive->subtype != types::PrimitiveSubtype::kInt32 &&
+         error_primitive->subtype != types::PrimitiveSubtype::kUint32)) {
+        error_reporter->ReportError(
+            *decl->name.maybe_location(),
+            "invalid error type: must be int32, uint32 or an enum therof");
+        return false;
+    }
+
+    return true;
+}
+
 Libraries::Libraries() {
+    AddAttributeSchema("Discoverable", AttributeSchema({
+        AttributeSchema::Placement::kInterfaceDecl,
+    }, {
+        "",
+    }));
+
     AddAttributeSchema("Doc", AttributeSchema({
         /* any placement */
     }, {
         /* any value */
     }));
+
+    AddAttributeSchema("FragileBase", AttributeSchema({
+        AttributeSchema::Placement::kInterfaceDecl,
+    }, {
+        "",
+    }));
+
+    AddAttributeSchema("Layout", AttributeSchema({
+        AttributeSchema::Placement::kInterfaceDecl,
+    }, {
+        "Simple",
+    },
+    SimpleLayoutConstraint));
+
     AddAttributeSchema("MaxBytes", AttributeSchema({
+        AttributeSchema::Placement::kInterfaceDecl,
+        AttributeSchema::Placement::kMethod,
         AttributeSchema::Placement::kStructDecl,
+        AttributeSchema::Placement::kTableDecl,
+        AttributeSchema::Placement::kUnionDecl,
+        AttributeSchema::Placement::kXUnionDecl,
     }, {
         /* any value */
     },
     MaxBytesConstraint));
+
+    AddAttributeSchema("Result", AttributeSchema({
+        AttributeSchema::Placement::kUnionDecl,
+    }, {
+        "",
+    },
+    ResultShapeConstraint));
+
+    AddAttributeSchema("Selector", AttributeSchema({
+        AttributeSchema::Placement::kMethod,
+        AttributeSchema::Placement::kXUnionMember,
+    }, {
+        /* any value */
+    }));
 }
 
 bool Libraries::Insert(std::unique_ptr<Library> library) {
@@ -786,6 +925,21 @@ void Library::ValidateAttributesConstraints(const Decl* decl,
     }
 }
 
+SourceLocation Library::GeneratedSimpleName(const std::string& name) {
+    return generated_source_file_.AddLine(name);
+}
+
+Name Library::NextAnonymousName() {
+    std::ostringstream data;
+    data << "SomeLongAnonymousPrefix";
+    data << anon_counter_++;
+    return Name(this, GeneratedSimpleName(data.str()));
+}
+
+Name Library::DerivedName(const std::vector<StringView>& components) {
+    return Name(this, GeneratedSimpleName(StringJoin(components, "_")));
+}
+
 bool Library::CompileCompoundIdentifier(const raw::CompoundIdentifier* compound_identifier,
                                         Name* name_out) {
     const auto& components = compound_identifier->components;
@@ -834,6 +988,7 @@ bool Library::RegisterDecl(Decl* decl) {
     switch (decl->kind) {
     case Decl::Kind::kBits:
     case Decl::Kind::kEnum:
+    case Decl::Kind::kInterface:
     case Decl::Kind::kStruct:
     case Decl::Kind::kTable:
     case Decl::Kind::kUnion:
@@ -1031,6 +1186,167 @@ bool Library::ConsumeEnumDeclaration(std::unique_ptr<raw::EnumDeclaration> enum_
     return RegisterDecl(enum_declarations_.back().get());
 }
 
+bool Library::ConsumeInterfaceDeclaration(std::unique_ptr<raw::InterfaceDeclaration> interface_decl) {
+    auto name = Name(this, interface_decl->identifier->location());
+
+    std::set<Name> superinterfaces;
+    for (auto& superinterface : interface_decl->superinterfaces) {
+        auto& protocol_name = superinterface->protocol_name;
+        Name superinterface_name;
+        if (!CompileCompoundIdentifier(protocol_name.get(), &superinterface_name))
+            return false;
+        if (!superinterfaces.insert(std::move(superinterface_name)).second)
+            return Fail(superinterface_name, "protocol composed multiple times");
+    }
+
+    int ordinal_val = 0;
+    std::vector<Interface::Method> methods;
+    for (auto& method : interface_decl->methods) {
+        SourceLocation method_name = method->identifier->location();
+
+        // TODO: generate ordinals the correct way
+        auto ordinal_literal = std::make_unique<raw::Ordinal>(*method, ++ordinal_val);
+        auto generated_ordinal = std::make_unique<raw::Ordinal>(*method, ordinal_val);
+
+        Struct* maybe_request = nullptr;
+        if (method->maybe_request != nullptr) {
+            Name request_name = NextAnonymousName();
+            if (!ConsumeParameterList(
+                    std::move(request_name),
+                    std::move(method->maybe_request),
+                    true, /* anonymous */
+                    &maybe_request))
+                return false;
+        }
+
+        bool has_error = (method->maybe_error_ctor != nullptr);
+        Struct* maybe_response = nullptr;
+        if (method->maybe_response != nullptr) {
+            Name response_name = has_error 
+                ? DerivedName({name.name_part(), method_name.data(), "Response"})
+                : NextAnonymousName();
+            if (!ConsumeParameterList(
+                    std::move(response_name),
+                    std::move(method->maybe_response),
+                    !has_error,
+                    &maybe_response))
+                return false;
+        }
+
+        if (has_error) {
+            if (!CreateMethodResult(name, method.get(), maybe_response, &maybe_response))
+                return false;
+        }
+
+        assert(maybe_request != nullptr || maybe_response != nullptr);
+        methods.emplace_back(
+            std::move(method->attributes),
+            std::move(ordinal_literal),
+            std::move(generated_ordinal),
+            std::move(method_name),
+            std::move(maybe_request),
+            std::move(maybe_response));
+    }
+
+    interface_declarations_.push_back(
+        std::make_unique<Interface>(
+            std::move(interface_decl->attributes),
+            std::move(name),
+            std::move(superinterfaces),
+            std::move(methods)));
+    return RegisterDecl(interface_declarations_.back().get());
+}
+
+bool Library::ConsumeParameterList(Name name, std::unique_ptr<raw::ParameterList> parameter_list,
+                                   bool anonymous, Struct** out_struct_decl) {
+    std::vector<Struct::Member> members;
+    for (auto& param : parameter_list->parameter_list) {
+        std::unique_ptr<TypeConstructor> type_ctor;
+        if (!ConsumeTypeConstructor(std::move(param->type_ctor), &type_ctor))
+            return false;
+        members.emplace_back(
+            nullptr /* attributes */,
+            std::move(type_ctor),
+            param->identifier->location(),
+            nullptr /* maybe_default_value */);
+    }
+
+    struct_declarations_.push_back(
+        std::make_unique<Struct>(
+            std::move(name),
+            nullptr /* attributes */,
+            std::move(members),
+            anonymous));
+    auto struct_decl_ptr = struct_declarations_.back().get();
+    if (!RegisterDecl(struct_decl_ptr))
+        return false;
+    *out_struct_decl = struct_decl_ptr;
+    return true;
+}
+
+bool Library::CreateMethodResult(const Name& interface_name,
+                                 raw::InterfaceMethod* method,
+                                 Struct* in_response,
+                                 Struct** out_response) {
+    std::unique_ptr<TypeConstructor> error_type_ctor;
+    if (!ConsumeTypeConstructor(std::move(method->maybe_error_ctor), &error_type_ctor))
+        return false;
+
+    std::vector<Union::Member> result_members;
+    result_members.emplace_back(
+        nullptr /* attributes */,
+        IdentifierTypeForDecl(in_response, types::Nullability::kNonnullable),
+        GeneratedSimpleName("response")
+    );
+    result_members.emplace_back(
+        nullptr /* attributes */,
+        std::move(error_type_ctor),
+        GeneratedSimpleName("err")
+    );
+
+    std::vector<std::unique_ptr<raw::Attribute>> result_attributes;
+    result_attributes.push_back(
+        std::make_unique<raw::Attribute>(*method, "Result", ""));
+
+    SourceLocation method_name = method->identifier->location();
+    Name result_name = DerivedName({interface_name.name_part(), method_name.data(), "Result"});
+    union_declarations_.push_back(
+        std::make_unique<Union>(
+            std::make_unique<raw::AttributeList>(*method, std::move(result_attributes)),
+            std::move(result_name),
+            std::move(result_members)));
+    auto result_decl_ptr = union_declarations_.back().get();
+    if (!RegisterDecl(result_decl_ptr))
+        return false;
+
+    std::vector<Struct::Member> response_members;
+    response_members.emplace_back(
+        nullptr /* attributes */,
+        IdentifierTypeForDecl(result_decl_ptr, types::Nullability::kNonnullable),
+        GeneratedSimpleName("result"),
+        nullptr /* maybe_default_value */);
+
+    struct_declarations_.push_back(
+        std::make_unique<Struct>(
+            NextAnonymousName(),
+            nullptr /* attributes */,
+            std::move(response_members),
+            true /* anonymous */));
+    auto struct_decl_ptr = struct_declarations_.back().get();
+    if (!RegisterDecl(struct_decl_ptr))
+        return false;
+    *out_response = struct_decl_ptr;
+    return true;
+}
+
+std::unique_ptr<TypeConstructor> Library::IdentifierTypeForDecl(const Decl* decl, types::Nullability nullability) {
+    return std::make_unique<TypeConstructor>(
+        Name(decl->name.library(), std::string(decl->name.name_part())),
+        nullptr /* maye_arg_type */,
+        nullptr /* maybe_size */,
+        nullability);
+}
+
 bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration) {
     std::vector<Struct::Member> members;
     for (auto& member : struct_declaration->members) {
@@ -1123,7 +1439,7 @@ bool Library::ConsumeXUnionDeclaration(std::unique_ptr<raw::XUnionDeclaration> x
     int ordinal_val = 0;
     for (auto& member : xunion_declaration->members) {
         // TODO: generate ordinal the correct way
-        auto ordinal = std::make_unique<raw::Ordinal>(*member, ordinal_val++);
+        auto ordinal = std::make_unique<raw::Ordinal>(*member, ++ordinal_val);
 
         std::unique_ptr<TypeConstructor> type_ctor;
         if (!ConsumeTypeConstructor(std::move(member->type_ctor), &type_ctor))
@@ -1207,6 +1523,13 @@ bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
     auto enum_declaration_list = std::move(file->enum_declaration_list);
     for (auto& enum_declaration : enum_declaration_list) {
         if (!ConsumeEnumDeclaration(std::move(enum_declaration))) {
+            return false;
+        }
+    }
+
+    auto interface_declaration_list = std::move(file->interface_declaration_list);
+    for (auto& interface_declaration : interface_declaration_list) {
+        if (!ConsumeInterfaceDeclaration(std::move(interface_declaration))) {
             return false;
         }
     }
@@ -1671,6 +1994,22 @@ bool Library::DeclDependencies(Decl* decl, std::set<Decl*>* out_edges) {
         }
         break;
     }
+    case Decl::Kind::kInterface: {
+        auto interface_decl = static_cast<const Interface*>(decl);
+        for (const auto& superinterface : interface_decl->superinterfaces) {
+            if (auto type_decl = LookupDeclByName(superinterface); type_decl)
+                edges.insert(type_decl);
+        }
+        for (const auto& method : interface_decl->methods) {
+            if (method.maybe_request != nullptr) {
+                edges.insert(method.maybe_request);
+            }
+            if (method.maybe_response != nullptr) {
+                edges.insert(method.maybe_response);
+            }
+        }
+        break;
+    }
     case Decl::Kind::kTable: {
         auto table_decl = static_cast<const Table*>(decl);
         for (const auto& member : table_decl->members) {
@@ -1816,6 +2155,7 @@ private:
 struct MethodScope {
     Scope<uint32_t> ordinals;
     Scope<StringView> names;
+    Scope<const Interface*> interfaces;
 };
 
 // A helper class to track when a Decl is compiling and compiled.
@@ -1854,6 +2194,12 @@ bool Library::CompileDecl(Decl* decl) {
     case Decl::Kind::kEnum: {
         auto enum_decl = static_cast<Enum*>(decl);
         if (!CompileEnum(enum_decl))
+            return false;
+        break;
+    }
+    case Decl::Kind::kInterface: {
+        auto interface_decl = static_cast<Interface*>(decl);
+        if (!CompileInterface(interface_decl))
             return false;
         break;
     }
@@ -1924,6 +2270,38 @@ bool Library::VerifyDeclAttributes(Decl* decl) {
         if (placement_ok.NoNewErrors()) {
             ValidateAttributesConstraints(
                 enum_declaration, enum_declaration->attributes.get());
+        }
+        break;
+    }
+    case Decl::Kind::kInterface: {
+        auto interface_decl = static_cast<Interface*>(decl);
+        ValidateAttributesPlacement(
+            AttributeSchema::Placement::kInterfaceDecl,
+            interface_decl->attributes.get());
+        for (const auto& method : interface_decl->all_methods) {
+            ValidateAttributesPlacement(
+                AttributeSchema::Placement::kMethod,
+                method->attributes.get());
+        }
+        if (placement_ok.NoNewErrors()) {
+            for (const auto method : interface_decl->all_methods) {
+                if (method->maybe_request) {
+                    ValidateAttributesConstraints(
+                        method->maybe_request,
+                        interface_decl->attributes.get());
+                    ValidateAttributesConstraints(
+                        method->maybe_request,
+                        method->attributes.get());
+                }
+                if (method->maybe_response) {
+                    ValidateAttributesConstraints(
+                        method->maybe_response,
+                        interface_decl->attributes.get());
+                    ValidateAttributesConstraints(
+                        method->maybe_response,
+                        method->attributes.get());
+                }
+            }
         }
         break;
     }
@@ -2122,6 +2500,90 @@ bool Library::CompileEnum(Enum* enum_declaration) {
         std::string message("enums may only be of integral primitive type, found ");
         message.append(NameFlatType(enum_declaration->subtype_ctor->type));
         return Fail(*enum_declaration, message);
+    }
+
+    return true;
+}
+
+bool Library::CompileInterface(Interface* interface_declaration) {
+    MethodScope method_scope;
+    auto CheckScopes = [this, &interface_declaration, &method_scope](const Interface* interface, auto Visitor) -> bool {
+        for (const auto& name : interface->superinterfaces) {
+            auto decl = LookupDeclByName(name);
+            if (!decl) {
+                std::string message("unknown type ");
+                message.append(name.name_part());
+                return Fail(name, message);
+            }
+            if (decl->kind != Decl::Kind::kInterface)
+                return Fail(name, "This superinterface declaration is not an interface");
+            if (!decl->HasAttribute("FragileBase")) {
+                std::string message = "interface ";
+                message += NameName(name, ".", "/");
+                message += " is not marked by [FragileBase] attribute, disallowing interface ";
+                message += NameName(interface_declaration->name, ".", "/");
+                message += " from inheriting from it";
+                return Fail(name, message);
+            }
+
+            auto superinterface = static_cast<const Interface*>(decl);
+            auto maybe_location = superinterface->name.maybe_location();
+            assert(maybe_location);
+            if (method_scope.interfaces.Insert(superinterface, *maybe_location).ok()) {
+                // why do we need to do this? doesn't the compile order and 
+                // DeclDependencies() ensure that these will have already been compiled
+                // (and thus already CheckScopes()d?)
+                if (!Visitor(superinterface, Visitor))
+                    return false;
+            } else {
+                // we have already seen this interface, don't traverse
+            }
+        }
+
+        for (const auto& method : interface->methods) {
+            auto name_result = method_scope.names.Insert(method.name.data(), method.name);
+            if (!name_result.ok())
+                return Fail(method.name,
+                            "Multiple methods with the same name in an interface; last occurrence was at " +
+                                name_result.previous_occurrence().position());
+            auto ordinal_result = method_scope.ordinals.Insert(method.generated_ordinal->value, method.name);
+            if (method.generated_ordinal->value == 0)
+                return Fail(method.generated_ordinal->location(), "Ordinal value 0 disallowed.");
+            if (!ordinal_result.ok()) {
+                return Fail(method.generated_ordinal->location(),
+                    "Multiple methods with the same ordinal in an interface");
+            }
+
+            // don't we need to do this for the superinterfaces too?
+            interface_declaration->all_methods.push_back(&method);
+        }
+        return true;
+    };
+
+    if (!CheckScopes(interface_declaration, CheckScopes))
+        return false;
+
+    interface_declaration->typeshape = HandleType::Shape();
+
+    for (auto& method : interface_declaration->methods) {
+        auto CreateMessage = [&](Struct* message) -> bool {
+            Scope<StringView> scope;
+            for (auto& param : message->members) {
+                if (!scope.Insert(param.name.data(), param.name).ok())
+                    return Fail(param.name, "Multiple parameters with the same name in a method");
+                if (!CompileTypeConstructor(param.type_ctor.get(), &param.fieldshape.Typeshape()))
+                    return false;
+            }
+            return true;
+        };
+        if (method.maybe_request) {
+            if (!CreateMessage(method.maybe_request))
+                return false;
+        }
+        if (method.maybe_response) {
+            if (!CreateMessage(method.maybe_response))
+                return false;
+        }
     }
 
     return true;

@@ -190,6 +190,12 @@ generate a JSON IR that can be consumed by a separate backend
 #### <a name="sourcefile"></a> SourceFile
 Wrapper around a file which is responsible for owning the data in that file.
 
+#### <a name="virtualsourcefile"></a> Virtual SourceFile
+A subclass of `SourceFile` that has a fake "filename" and is initialized with
+no backing data. It exposes an `AddLine()` method to add data to the file, and
+is used as a backing `SourceFile` for content that does not appear directly in
+any of the input `SourceFile`s, like for generated anonymous [`Name`](#name)s.
+
 #### <a name="sourcemanager"></a> SourceManager
 Wrapper around a set of `SourceFile`s that all relate to a single `Library`.
 

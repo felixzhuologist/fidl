@@ -110,6 +110,8 @@ std::string NameFlatTypeKind(flat::Type::Kind kind) {
         return "vector";
     case flat::Type::Kind::kString:
         return "string";
+    case flat::Type::Kind::kHandle:
+        return "handle";
     case flat::Type::Kind::kPrimitive:
         return "primitive";
     case flat::Type::Kind::kIdentifier:
@@ -175,6 +177,17 @@ void NameFlatTypeHelper(std::ostringstream& buf, const flat::Type* type) {
             buf << ":";
             buf << string_type->max_size->value;
         }
+        break;
+    }
+    case flat::Type::Kind::kHandle: {
+        // auto handle_type = static_cast<const flat::HandleType*>(type);
+        buf << "handle";
+        // TODO: complete when handle subtypes are added 
+        // if (handle_type->subtype != types::HandleSubtype::kHandle) {
+        //     buf << "<";
+        //     buf << NameHandleSubtype(handle_type->subtype);
+        //     buf << ">";
+        // }
         break;
     }
     case flat::Type::Kind::kPrimitive: {

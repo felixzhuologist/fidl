@@ -329,6 +329,11 @@ void JSONGenerator::Generate(const flat::Type* value) {
             GenerateObjectMember("nullable", type->nullability);
             break;   
         }
+        case flat::Type::Kind::kHandle: {
+            auto type = static_cast<const flat::HandleType*>(value);
+            GenerateObjectMember("nullable", type->nullability);
+            break;
+        }
         case flat::Type::Kind::kPrimitive: {
             auto type = static_cast<const flat::PrimitiveType*>(value);
             GenerateObjectMember("subtype", type->subtype);
@@ -391,6 +396,44 @@ void JSONGenerator::Generate(const flat::Enum& value) {
         GenerateObjectMember("type", value.type->subtype);
         GenerateObjectMember("members", value.members);
     });
+}
+
+void JSONGenerator::Generate(const flat::Interface& value) {
+    GenerateObject([&]() {
+        GenerateObjectMember("name", value.name, Position::kFirst);
+        GenerateObjectMember("location", NameLocation(value.name));
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+        GenerateObjectMember("methods", value.all_methods);
+    });
+}
+
+void JSONGenerator::Generate(const flat::Interface::Method* method) {
+    assert(method != nullptr);
+    const auto& value = *method;
+    GenerateObject([&]() {
+        GenerateObjectMember("ordinal", value.ordinal, Position::kFirst);
+        GenerateObjectMember("generated_ordinal", value.generated_ordinal);
+        GenerateObjectMember("name", value.name);
+        GenerateObjectMember("location", NameLocation(value.name));
+        GenerateObjectMember("has_request", value.maybe_request != nullptr);
+        if (value.attributes)
+            GenerateObjectMember("maybe_attributes", value.attributes);
+        if (value.maybe_request != nullptr) {
+            GenerateRequest("maybe_request", *value.maybe_request);
+        }
+        GenerateObjectMember("has_response", value.maybe_response != nullptr);
+        if (value.maybe_response != nullptr) {
+            GenerateRequest("maybe_response", *value.maybe_response);
+        }
+    });
+}
+
+void JSONGenerator::GenerateRequest(const std::string& prefix, const flat::Struct& value) {
+    GenerateObjectMember(prefix, value.members);
+    GenerateObjectMember(prefix + "_size", value.typeshape.Size());
+    GenerateObjectMember(prefix + "_alignment", value.typeshape.Alignment());
+    GenerateObjectMember(prefix + "_has_padding", value.typeshape.HasPadding());
 }
 
 void JSONGenerator::Generate(const flat::Enum::Member& value) {
@@ -600,6 +643,7 @@ std::ostringstream JSONGenerator::Produce() {
         GenerateObjectMember("bits_declarations", library_->bits_declarations_);
         GenerateObjectMember("const_declarations", library_->const_declarations_);
         GenerateObjectMember("enum_declarations", library_->enum_declarations_);
+        GenerateObjectMember("interface_declarations", library_->interface_declarations_);
         GenerateObjectMember("struct_declarations", library_->struct_declarations_);
         GenerateObjectMember("table_declarations", library_->table_declarations_);
         GenerateObjectMember("union_declarations", library_->union_declarations_);
