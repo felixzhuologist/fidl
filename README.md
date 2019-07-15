@@ -9,24 +9,26 @@ flags, which describe a list of files grouped by library. We parse each file
 individually to obtain a parse tree for each file:
 
 1. Each file is loaded into a [`SourceFile`](#sourcefile), which owns the buffer backing the file
-and provides low level methods into the file's data
 2. We initialize a [`Lexer`](#lexing), which takes the `SourceFile` as an argument to its constructor.
 This class exposes a `Lex()` method, which generates a sequence of [`Token`](#token)s.
-3. We initialize a [`Parser`](#parsing) using the `Lexer`, and call the `Parse()` method which constructs a parse tree, referred to as a "raw" AST. The function returns a `raw::File` which is the class representing the root node of the raw AST.
+3. We initialize a [`Parser`](#parsing) using the `Lexer`, and call the `Parse()` method which constructs a parse tree, referred to in the code as a "raw" AST. The function returns a `raw::File` which is the class representing the root node of the raw AST.
 
 Now that we have parsed each file into a parser tree, we then work to group the 
-parser trees into a single flat AST representation for each library. The root of this AST
-for a single library is a `flat::Library`.
+parse trees into a single AST representation (referred to in the code as a "flat"
+AST) for each library. The root of this AST for a single library is a `flat::Library`.
 
 1. For each library, we traverse the `raw::File`s containing its definitions, converting
 nodes to their "flat" counterparts (e.g. a `raw::StructDeclaration` becomes a
-`flat::Struct`, `raw::CompoundIdentifier` becomes a [`flat::Name`](#name)), and
-storing them into a single `flat::Library`.
+`flat::Struct`, `raw::CompoundIdentifier` becomes a [`flat::Name`](#name), etc.), and
+storing them into a single `flat::Library`. Initially these flat ast nodes contain
+essentially the same information as the raw ast nodes, but they contain fields
+(namely, a value field for values and a typeshape field for types) that get set
+during compilation later
 2. Once the AST has been fully initialized, the compiler evaluates constants and
 determines the memory alignment information for the declared types
 
 Finally, we end up with a flat AST that is processed and ready for backend
-generation - either to C bindings or to a JSON IR.
+generation either to C bindings or to a JSON IR.
 
 ### <a name="lexing"></a> Lexing
 The `Lexer` works primarily by keeping track of two `char *` pointer into the file data - one which marks the current location that the class is at (`current_`), and one which marks the start of the lexeme that is currently being worked on (`token_start_`). Each time the `Lex()` method is called, the `current_` pointer is advanced until a complete lexeme has been traversed, and a `Token` is constructed using the data in between the two pointers.
@@ -75,14 +77,15 @@ where we can repeat the process for the next token:
 
 Internally the two pointers are manipulated via three main methods:
 
-1. `Skip()`, which simply skips over any characters that we don't care about (e.g. whitespace) by moving both pointers forward.
+1. `Skip()`, which simply skips over any characters that we don't care about (e.g. whitespace) by moving both the `current_` and the `token_start_` pointers forward.
 2. `Consume()`, which returns the current char and advances `current_`. 
 3. `Reset()`, returns the data between `token_start_` and `current_`, then sets `token_start_` to the value of `current_`.
 
 ### <a name="parsing"></a> Parsing
 The Parser's goal is to convert a `Token` stream from a single FIDL file (generated using the Lexer) into a parse tree (referred to as a "raw" AST) via the `Parse()` method, and is implemented using [recursive descent](https://en.wikipedia.org/wiki/Recursive_descent_parser). Each node of the raw AST (which is just a [start/end token pair](#sourceelement) along with pointers to any children) has a corresponding `ParseFoo()` method that consumes `Token`s from the `Lexer` and returns a `unique_ptr` to an instance of that node, or a nullptr on failure.
 
-The `Parser` keeps track of the current nodes that are being build using a stack of [`SourceElements`](#sourceelement) (`active_ast_scopes_`) as well as the current and previous `Token`s that are being processed (`last_token_` and `previous_token_`, respectively). 
+The `Parser` keeps track of the current nodes that are being build using a stack of [`SourceElements`](#sourceelement) (`active_ast_scopes_`) as well as the current and previous `Token`s that are being processed (`last_token_` and `previous_token_`, respectively). The current token (`last_token_`) is always the next token that is about to
+be consumed, which effectively gives the parser a one token lookahead.
 
 The parser determines what kind of node the current `Token` belongs to based
 on the `Token::Kind` of `last_token_` (via the `Peek()` method), and updates its
@@ -203,12 +206,12 @@ Wrapper around a set of `SourceFile`s that all relate to a single `Library`.
 Wrapper around a `StringView` and the `SourceFile` it comes from. It provides methods to get the surrounding line of the `StringView` as well as its location in the form of a `"[filename]:[line]:[col]"` string
 
 #### <a name="token"></a> Token
-A token is essentially a lexeme (in the form of a `SourceLocation`stored as the
+A token is essentially a lexeme (in the form of a [`SourceLocation`](#sourcelocation) stored as the
 `location_` attribute), enhanced with two other pieces information that are useful
 to the parser during the later stages of compilation:
 
 1. `previous_end_`, a `SourceLocation` which starts at the end of the previous token and ends at the start of this one. It contains data that is uninteresting to the parser i.e. whitespace.
-2. A "kind" and "subkind" which together classifies the lexeme. The possible kinds are: the special characters (e.g. `Kind::LeftParen`, `Kind::Dot`, `Kind::Comma`, etc.), string/numeric constants, or identifiers. Tokens that are keywords (e.g. `const`, `struct`) are considered identifiers, but also have a subkind defined to identify which keyword it is (e.g. `Subkind::Struct`, `Subkind::Using`); all other tokens have a subkind of None. Unitialized tokens have a kind of `kNotAToken`.
+2. A "kind" and "subkind" which together classifies the lexeme. The possible kinds are: the special characters (e.g. `Kind::LeftParen`, `Kind::Dot`, `Kind::Comma`, etc.), string/numeric constants, or identifiers. Tokens that are keywords (e.g. `const`, `struct`) are considered identifiers, but also have a subkind defined to identify which keyword it is (e.g. `Subkind::Const`, `Subkind::Struct`); all other tokens have a subkind of None. Uninitialized tokens have a kind of `kNotAToken`.
 
 #### <a name="sourceelement"></a> SourceElement
 A SourceElement represents a block of code inside a fidl file and is parameterized by a
@@ -225,8 +228,8 @@ all parser tree nodes, and corresponds to all possible declarations that a user 
 make in a FIDL file. There are two types of `Decl`s: `Const`s, which declare a value,
 and have a `value_` attribute that gets resolved during compilation, and `TypeDecl`s,
 which declare a message type or interface and have a `typeshape_` attribute that
-gets set during compilation. `TypeDecl`s also have a static `Shape()` method which
-is what actually determines the typeshape of that specific type.
+gets set during compilation. `TypeDecl`s will also generally have a static `Shape()`
+method which contains the logic for determining the `Typeshape` of that given type.
 
 #### <a name="type"></a> Type
 A struct representing an instance of a type. For example, the `vector<int32>:10?`
@@ -236,8 +239,6 @@ all have a static `Shape()` method which will return the `Typeshape` given the
 parameters for an instance of that type. User defined types (e.g. structs
 or unions) will all have a type of `IdentifierType` - the corresponding [`TypeDecl`](#typedecl),
 like `Struct` provides the static `Shape()` method instead.
-
-TODO: discuss where/how types are used
 
 #### <a name="typespace"></a> Typespace
 The typespace is essentially a map from [`Type`](#type) names to a `TypeTemplate` for that
