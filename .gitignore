@@ -3,6 +3,7 @@ main
 test.fidl
 test2.fidl
 out.json
+out.h
 
 bazel-bin
 bazel-fidl

@@ -8,17 +8,22 @@
 #include "names.h"
 #include "parser.h"
 #include "source_manager.h"
+#include "c_generator.h"
 #include "json_generator.h"
 
 namespace {
 
 void Usage() {
     std::cout
-        << "usage: fidlc [--json JSON_PATH]\n"
+        << "usage: fidlc [--c-header HEADER_PATH]\n"
+           "             [--json JSON_PATH]\n"
            "             [--name LIBRARY_NAME]\n"
            "             [--werror]\n"
            "             [--files [FIDL_FILE...]...]\n"
            "             [--help]\n"
+           "\n"
+           " * `--c-header HEADER_PATH`. If present, this flag instructs `fidlc` to output\n"
+           "   a C header at the given path.\n"
            "\n"
            " * `--json JSON_PATH`. If present, this flag instructs `fidlc` to output the\n"
            "   library's intermediate representation at the given path. The intermediate\n"
@@ -51,6 +56,7 @@ void Usage() {
 }
 
 enum class Behavior {
+    kCHeader,
     kJSON,
 };
 
@@ -180,6 +186,11 @@ int compile(fidl::ErrorReporter* error_reporter,
     auto& output_file = output.second;
 
     switch (behavior) {
+    case Behavior::kCHeader: {
+        fidl::CGenerator generator(final_library);
+        Write(generator.ProduceHeader(), std::move(output_file));
+        break;
+    }
     case Behavior::kJSON: {
       fidl::JSONGenerator generator(final_library);
       Write(generator.Produce(), std::move(output_file));
@@ -212,6 +223,8 @@ int main(int argc, char* argv[]) {
             exit(0);
         } else if (flag == "--werror") {
             warnings_as_errors = true;
+        } else if (flag == "--c-header") {
+            outputs.emplace(Behavior::kCHeader, Open(argv_args->Claim(), std::ios::out));
         } else if (flag == "--json") {
             outputs.emplace(Behavior::kJSON, Open(argv_args->Claim(), std::ios::out));
         } else if (flag == "--name") {

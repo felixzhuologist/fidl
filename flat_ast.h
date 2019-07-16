@@ -1094,6 +1094,8 @@ public:
     template <typename NumericType>
     bool ParseNumericLiteral(const raw::NumericLiteral* literal, NumericType* out_value) const;
 
+    bool HasAttribute(StringView name) const;
+
     const std::set<Library*>& dependencies() const;
 
     const std::vector<StringView>& name() const { return library_name_; }

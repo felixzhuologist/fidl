@@ -231,6 +231,10 @@ std::string NameLibrary(const std::vector<StringView>& library_name) {
     return StringJoin(library_name, ".");
 }
 
+std::string NameLibraryCHeader(const std::vector<StringView>& library_name) {
+    return StringJoin(library_name, "/") + "/c/fidl.h";
+}
+
 std::string NameOrdinal(StringView method_name) {
     std::string ordinal_name(method_name);
     ordinal_name += "Ordinal";

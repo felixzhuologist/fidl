@@ -2872,6 +2872,12 @@ bool Library::Compile() {
     return error_reporter_->errors().size() == 0;
 }
 
+bool Library::HasAttribute(StringView name) const {
+    if (!attributes_)
+        return false;
+    return attributes_->HasAttribute(std::string(name));
+}
+
 const std::set<Library*>& Library::dependencies() const {
     return dependencies_.dependencies();
 }
