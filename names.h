@@ -20,6 +20,7 @@ std::string NameLibrary(const std::vector<StringView>& library_name);
 std::string NameLibraryCHeader(const std::vector<StringView>& library_name);
 
 std::string NamePrimitiveSubtype(types::PrimitiveSubtype subtype);
+std::string NamePrimitiveIntegerCConstantMacro(types::PrimitiveSubtype type);
 
 std::string NameRawLiteralKind(raw::Literal::Kind kind);
 

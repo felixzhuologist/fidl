@@ -58,8 +58,112 @@ void CGenerator::GenerateEpilogues() {
     EmitEndExternC(&file_);
 }
 
+void CGenerator::GeneratePrimitiveDefine(StringView name, types::PrimitiveSubtype subtype,
+                                         StringView value) {
+    switch (subtype) {
+    case types::PrimitiveSubtype::kInt8:
+    case types::PrimitiveSubtype::kInt16:
+    case types::PrimitiveSubtype::kInt32:
+    case types::PrimitiveSubtype::kInt64:
+    case types::PrimitiveSubtype::kUint8:
+    case types::PrimitiveSubtype::kUint16:
+    case types::PrimitiveSubtype::kUint32:
+    case types::PrimitiveSubtype::kUint64: {
+        std::string literal_macro = NamePrimitiveIntegerCConstantMacro(subtype);
+        file_ << "#define " << std::string(name) << " " << std::string(literal_macro) << "(" << std::string(value) << ")\n";
+        break;
+    }
+    case types::PrimitiveSubtype::kBool:
+    case types::PrimitiveSubtype::kFloat32:
+    case types::PrimitiveSubtype::kFloat64: {
+        file_ << "#define " << std::string(name) << " "
+              << "(" << std::string(value) << ")\n";
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+void CGenerator::GenerateStringDefine(StringView name, StringView value) {
+    file_ << "#define " << std::string(name) << " " << std::string(value) << "\n";
+}
+
+std::map<const flat::Decl*, CGenerator::NamedConst>
+CGenerator::NameConsts(const std::vector<std::unique_ptr<flat::Const>>& const_infos) {
+    std::map<const flat::Decl*, NamedConst> named_consts;
+    for (const auto& const_info : const_infos) {
+        named_consts.emplace(const_info.get(), NamedConst{NameName(const_info->name, "_", "_"), *const_info});
+    }
+    return named_consts;
+}
+
+void CGenerator::ProduceConstForwardDeclaration(const NamedConst& named_const) {
+
+}
+
+void CGenerator::ProduceConstDeclaration(const NamedConst& named_const) {
+    const flat::Const& ci = named_const.const_info;
+
+    if (ci.value->kind != flat::Constant::Kind::kLiteral) {
+        return;
+    }
+
+    switch (ci.type_ctor->type->kind) {
+    case flat::Type::Kind::kPrimitive:
+        GeneratePrimitiveDefine(
+            named_const.name,
+            static_cast<const flat::PrimitiveType*>(ci.type_ctor->type)->subtype,
+            static_cast<flat::LiteralConstant*>(ci.value.get())->literal->location().data());
+        break;
+    case flat::Type::Kind::kString:
+        GenerateStringDefine(
+            named_const.name,
+            static_cast<flat::LiteralConstant*>(ci.value.get())->literal->location().data());
+        break;
+    default:
+        break;
+    }
+
+    EmitBlank(&file_);
+}
+
 std::ostringstream CGenerator::ProduceHeader() {
     GeneratePrologues();
+
+    std::map<const flat::Decl*, NamedConst> named_consts =
+        NameConsts(library_->const_declarations_);
+
+    file_ << "\n// Forward declarations\n\n";
+    for (const auto* decl : library_->declaration_order_) {
+        switch (decl->kind) {
+        case flat::Decl::Kind::kConst: {
+            auto iter = named_consts.find(decl);
+            // when would this ever happen? shouldn't this be an error
+            if (iter != named_consts.end()) {
+                ProduceConstForwardDeclaration(iter->second);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    file_ << "\n// Declarations\n\n";
+    for (const auto* decl : library_->declaration_order_) {
+        switch (decl->kind) {
+        case flat::Decl::Kind::kConst: {
+            auto iter = named_consts.find(decl);
+            if (iter != named_consts.end()) {
+                ProduceConstDeclaration(iter->second);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
 
     GenerateEpilogues();
 

@@ -63,6 +63,34 @@ std::string NamePrimitiveSubtype(types::PrimitiveSubtype subtype) {
     }
 }
 
+std::string NamePrimitiveIntegerCConstantMacro(types::PrimitiveSubtype subtype) {
+    switch (subtype) {
+    case types::PrimitiveSubtype::kInt8:
+        return "INT8_C";
+    case types::PrimitiveSubtype::kInt16:
+        return "INT16_C";
+    case types::PrimitiveSubtype::kInt32:
+        return "INT32_C";
+    case types::PrimitiveSubtype::kInt64:
+        return "INT64_C";
+    case types::PrimitiveSubtype::kUint8:
+        return "UINT8_C";
+    case types::PrimitiveSubtype::kUint16:
+        return "UINT16_C";
+    case types::PrimitiveSubtype::kUint32:
+        return "UINT32_C";
+    case types::PrimitiveSubtype::kUint64:
+        return "UINT64_C";
+    case types::PrimitiveSubtype::kBool:
+        assert(false && "Tried to generate an integer constant for a bool");
+        return "";
+    case types::PrimitiveSubtype::kFloat32:
+    case types::PrimitiveSubtype::kFloat64:
+        assert(false && "Tried to generate an integer constant for a float");
+        return "";
+    }
+}
+
 std::string NameRawLiteralKind(raw::Literal::Kind kind) {
     switch (kind) {
     case raw::Literal::Kind::kString:
