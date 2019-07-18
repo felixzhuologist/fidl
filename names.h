@@ -30,6 +30,7 @@ std::string NameFlatTypeKind(flat::Type::Kind kind);
 std::string NameFlatConstant(const flat::Constant* constant);
 std::string NameFlatTypeConstructor(const flat::TypeConstructor* type_ctor);
 std::string NameFlatType(const flat::Type* type);
+std::string NameFlatCType(const flat::Type* type, flat::Decl::Kind decl_kind);
 std::string NameMessage(StringView method_name, types::MessageKind kind);
 
 std::string NameTable(StringView type_name);
