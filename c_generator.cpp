@@ -28,6 +28,102 @@ void EmitBlank(std::ostream* file) {
     *file << "\n";
 }
 
+void BitsValue(const flat::Constant* constant, std::string* out_value) {
+    std::ostringstream member_value;
+
+    const flat::ConstantValue& const_val = constant->Value();
+    switch (const_val.kind) {
+    case flat::ConstantValue::Kind::kUint8: {
+        auto value = static_cast<const flat::NumericConstantValue<uint8_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kUint16: {
+        auto value = static_cast<const flat::NumericConstantValue<uint16_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kUint32: {
+        auto value = static_cast<const flat::NumericConstantValue<uint32_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kUint64: {
+        auto value = static_cast<const flat::NumericConstantValue<uint64_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kInt8:
+    case flat::ConstantValue::Kind::kInt16:
+    case flat::ConstantValue::Kind::kInt32:
+    case flat::ConstantValue::Kind::kInt64:
+    case flat::ConstantValue::Kind::kBool:
+    case flat::ConstantValue::Kind::kFloat32:
+    case flat::ConstantValue::Kind::kFloat64:
+    case flat::ConstantValue::Kind::kString:
+        assert(false && "bad primitive type for a bits declaration");
+        break;
+    }
+
+    *out_value = member_value.str();
+}
+
+void EnumValue(const flat::Constant* constant, std::string* out_value) {
+    std::ostringstream member_value;
+
+    const flat::ConstantValue& const_val = constant->Value();
+    switch (const_val.kind) {
+    case flat::ConstantValue::Kind::kInt8: {
+        auto value = static_cast<const flat::NumericConstantValue<int8_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kInt16: {
+        auto value = static_cast<const flat::NumericConstantValue<int16_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kInt32: {
+        auto value = static_cast<const flat::NumericConstantValue<int32_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kInt64: {
+        auto value = static_cast<const flat::NumericConstantValue<int64_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kUint8: {
+        auto value = static_cast<const flat::NumericConstantValue<uint8_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kUint16: {
+        auto value = static_cast<const flat::NumericConstantValue<uint16_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kUint32: {
+        auto value = static_cast<const flat::NumericConstantValue<uint32_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kUint64: {
+        auto value = static_cast<const flat::NumericConstantValue<uint64_t>&>(const_val);
+        member_value << value;
+        break;
+    }
+    case flat::ConstantValue::Kind::kBool:
+    case flat::ConstantValue::Kind::kFloat32:
+    case flat::ConstantValue::Kind::kFloat64:
+    case flat::ConstantValue::Kind::kString:
+        assert(false && "bad primitive type for an enum");
+        break;
+    }
+
+    *out_value = member_value.str();
+}
+
 void CGenerator::GeneratePrologues() {
     EmitFileComment(&file_);
     EmitHeaderGuard(&file_);
@@ -56,6 +152,11 @@ void CGenerator::GeneratePrologues() {
 
 void CGenerator::GenerateEpilogues() {
     EmitEndExternC(&file_);
+}
+
+void CGenerator::GenerateIntegerDefine(StringView name, types::PrimitiveSubtype subtype, StringView value) {
+    std::string literal_macro = NamePrimitiveIntegerCConstantMacro(subtype);
+    file_ << "#define " << std::string(name) << " " << literal_macro << "(" << std::string(value) << ")\n";
 }
 
 void CGenerator::GeneratePrimitiveDefine(StringView name, types::PrimitiveSubtype subtype,
@@ -89,6 +190,21 @@ void CGenerator::GenerateStringDefine(StringView name, StringView value) {
     file_ << "#define " << std::string(name) << " " << std::string(value) << "\n";
 }
 
+void CGenerator::GenerateIntegerTypedef(types::PrimitiveSubtype subtype, StringView name) {
+    std::string underlying_type = NamePrimitiveCType(subtype);
+    file_ << "typedef " << underlying_type << " " << std::string(name) << ";\n";
+}
+
+std::map<const flat::Decl*, CGenerator::NamedBits>
+CGenerator::NameBits(const std::vector<std::unique_ptr<flat::Bits>>& bits_infos) {
+    std::map<const flat::Decl*, NamedBits> named_bits;
+    for (const auto& bits_info : bits_infos) {
+        std::string bits_name = NameName(bits_info->name, "_", "_");
+        named_bits.emplace(bits_info.get(), NamedBits{std::move(bits_name), *bits_info});
+    }
+    return named_bits;
+}
+
 std::map<const flat::Decl*, CGenerator::NamedConst>
 CGenerator::NameConsts(const std::vector<std::unique_ptr<flat::Const>>& const_infos) {
     std::map<const flat::Decl*, NamedConst> named_consts;
@@ -98,8 +214,42 @@ CGenerator::NameConsts(const std::vector<std::unique_ptr<flat::Const>>& const_in
     return named_consts;
 }
 
+std::map<const flat::Decl*, CGenerator::NamedEnum>
+CGenerator::NameEnums(const std::vector<std::unique_ptr<flat::Enum>>& enum_infos) {
+    std::map<const flat::Decl*, NamedEnum> named_enums;
+    for (const auto& enum_info : enum_infos) {
+        std::string enum_name = NameName(enum_info->name, "_", "_");
+        named_enums.emplace(enum_info.get(), NamedEnum{std::move(enum_name), *enum_info});
+    }
+    return named_enums;
+}
+
+void CGenerator::ProduceBitsForwardDeclaration(const NamedBits& named_bits) {
+    auto subtype = static_cast<const flat::PrimitiveType*>(named_bits.bits_info.subtype_ctor->type)->subtype;
+    GenerateIntegerTypedef(subtype, named_bits.name);
+    for (const auto& member : named_bits.bits_info.members) {
+        std::string member_name = named_bits.name + "_" + NameIdentifier(member.name);
+        std::string member_value;
+        BitsValue(member.value.get(), &member_value);
+        GenerateIntegerDefine(member_name, subtype, std::move(member_value));
+    }
+    EmitBlank(&file_);
+}
+
 void CGenerator::ProduceConstForwardDeclaration(const NamedConst& named_const) {
 
+}
+
+void CGenerator::ProduceEnumForwardDeclaration(const NamedEnum& named_enum) {
+    types::PrimitiveSubtype subtype = named_enum.enum_info.type->subtype;
+    GenerateIntegerTypedef(subtype, named_enum.name);
+    for (const auto& member : named_enum.enum_info.members) {
+        std::string member_name = named_enum.name + "_" + NameIdentifier(member.name);
+        std::string member_value;
+        EnumValue(member.value.get(), &member_value);
+        GenerateIntegerDefine(member_name, subtype, std::move(member_value));
+    }
+    EmitBlank(&file_);
 }
 
 void CGenerator::ProduceConstDeclaration(const NamedConst& named_const) {
@@ -131,17 +281,35 @@ void CGenerator::ProduceConstDeclaration(const NamedConst& named_const) {
 std::ostringstream CGenerator::ProduceHeader() {
     GeneratePrologues();
 
+    std::map<const flat::Decl*, NamedBits> named_bits = NameBits(library_->bits_declarations_);
     std::map<const flat::Decl*, NamedConst> named_consts =
         NameConsts(library_->const_declarations_);
+    std::map<const flat::Decl*, NamedEnum> named_enums = NameEnums(library_->enum_declarations_);
 
     file_ << "\n// Forward declarations\n\n";
     for (const auto* decl : library_->declaration_order_) {
         switch (decl->kind) {
+        case flat::Decl::Kind::kBits: {
+            auto iter = named_bits.find(decl);
+            // when would this ever happen? shouldn't this be an error
+            if (iter != named_bits.end()) {
+                ProduceBitsForwardDeclaration(iter->second);
+            }
+            break;
+        }
         case flat::Decl::Kind::kConst: {
             auto iter = named_consts.find(decl);
             // when would this ever happen? shouldn't this be an error
             if (iter != named_consts.end()) {
                 ProduceConstForwardDeclaration(iter->second);
+            }
+            break;
+        }
+        case flat::Decl::Kind::kEnum: {
+            auto iter = named_enums.find(decl);
+            // when would this ever happen? shouldn't this be an error
+            if (iter != named_enums.end()) {
+                ProduceEnumForwardDeclaration(iter->second);
             }
             break;
         }
@@ -153,6 +321,10 @@ std::ostringstream CGenerator::ProduceHeader() {
     file_ << "\n// Declarations\n\n";
     for (const auto* decl : library_->declaration_order_) {
         switch (decl->kind) {
+        case flat::Decl::Kind::kBits:
+            // Bits can be entirely forward declared, as they have no
+            // dependencies other than standard headers.
+            break;
         case flat::Decl::Kind::kConst: {
             auto iter = named_consts.find(decl);
             if (iter != named_consts.end()) {
@@ -160,6 +332,10 @@ std::ostringstream CGenerator::ProduceHeader() {
             }
             break;
         }
+        case flat::Decl::Kind::kEnum:
+            // Enums can be entirely forward declared, as they have no
+            // dependencies other than standard headers.
+            break;
         default:
             break;
         }

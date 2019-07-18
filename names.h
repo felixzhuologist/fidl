@@ -19,6 +19,7 @@ std::string NameName(const flat::Name& name, StringView library_separator, Strin
 std::string NameLibrary(const std::vector<StringView>& library_name);
 std::string NameLibraryCHeader(const std::vector<StringView>& library_name);
 
+std::string NamePrimitiveCType(types::PrimitiveSubtype subtype);
 std::string NamePrimitiveSubtype(types::PrimitiveSubtype subtype);
 std::string NamePrimitiveIntegerCConstantMacro(types::PrimitiveSubtype type);
 
