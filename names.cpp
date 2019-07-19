@@ -185,6 +185,14 @@ std::string NameFlatConstantKind(flat::Constant::Kind kind) {
     }
 }
 
+std::string NameUnionTag(std::string_view union_name, const flat::Union::Member& member) {
+    return std::string(union_name) + "Tag_" + NameIdentifier(member.name);
+}
+
+std::string NameXUnionTag(std::string_view xunion_name, const flat::XUnion::Member& member) {
+    return std::string(xunion_name) + "Tag_" + NameIdentifier(member.name);
+}
+
 std::string NameFlatConstant(const flat::Constant* constant) {
     switch (constant->kind) {
     case flat::Constant::Kind::kLiteral: {

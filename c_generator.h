@@ -65,6 +65,16 @@ private:
         const flat::Table& table_info;
     };
 
+    struct NamedUnion {
+        std::string name;
+        const flat::Union& union_info;
+    };
+
+    struct NamedXUnion {
+        std::string name;
+        const flat::XUnion& xunion_info;
+    };
+
     enum class StructKind {
         kMessage,
         kNonmessage,
@@ -80,6 +90,8 @@ private:
     void GenerateStructTypedef(StringView name);
 
     void GenerateStructDeclaration(StringView name, const std::vector<Member>& members, StructKind kind);
+    void GenerateTaggedUnionDeclaration(StringView name, const std::vector<Member>& members);
+    void GenerateTaggedXUnionDeclaration(StringView name, const std::vector<Member>& members);
 
     std::map<const flat::Decl*, NamedBits>
     NameBits(const std::vector<std::unique_ptr<flat::Bits>>& bits_infos);
@@ -91,15 +103,23 @@ private:
     NameStructs(const std::vector<std::unique_ptr<flat::Struct>>& struct_infos);
     std::map<const flat::Decl*, NamedTable>
     NameTables(const std::vector<std::unique_ptr<flat::Table>>& table_infos);
+    std::map<const flat::Decl*, NamedUnion>
+    NameUnions(const std::vector<std::unique_ptr<flat::Union>>& union_infos);
+    std::map<const flat::Decl*, NamedXUnion>
+    NameXUnions(const std::vector<std::unique_ptr<flat::XUnion>>& xunion_infos);
 
     void ProduceBitsForwardDeclaration(const NamedBits& named_bits);
     void ProduceConstForwardDeclaration(const NamedConst& named_const);
     void ProduceEnumForwardDeclaration(const NamedEnum& named_enum);
     void ProduceStructForwardDeclaration(const NamedStruct& named_struct);
     void ProduceTableForwardDeclaration(const NamedTable& named_table);
+    void ProduceUnionForwardDeclaration(const NamedUnion& named_union);
+    void ProduceXUnionForwardDeclaration(const NamedXUnion& named_xunion);
 
     void ProduceConstDeclaration(const NamedConst& named_const);
     void ProduceStructDeclaration(const NamedStruct& named_struct);
+    void ProduceUnionDeclaration(const NamedUnion& named_union);
+    void ProduceXUnionDeclaration(const NamedXUnion& named_xunion);
 
     const flat::Library* library_;
     std::ostringstream file_;

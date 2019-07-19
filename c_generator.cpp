@@ -234,6 +234,28 @@ CGenerator::Member CreateMember(const flat::Library* library, const T& decl) {
     };
 }
 
+std::vector<CGenerator::Member>
+GenerateMembers(const flat::Library* library,
+                const std::vector<flat::Union::Member>& union_members) {
+    std::vector<CGenerator::Member> members;
+    members.reserve(union_members.size());
+    for (const auto& member : union_members) {
+        members.push_back(CreateMember(library, member));
+    }
+    return members;
+}
+
+std::vector<CGenerator::Member>
+GenerateMembers(const flat::Library* library,
+                const std::vector<flat::XUnion::Member>& xunion_members) {
+    std::vector<CGenerator::Member> members;
+    members.reserve(xunion_members.size());
+    for (const auto& xunion_member : xunion_members) {
+        members.push_back(CreateMember(library, xunion_member));
+    }
+    return members;
+}
+
 } // namespace
 
 void CGenerator::GeneratePrologues() {
@@ -335,6 +357,24 @@ void CGenerator::GenerateStructDeclaration(StringView name, const std::vector<Me
     file_ << "};\n";
 }
 
+void CGenerator::GenerateTaggedUnionDeclaration(StringView name, const std::vector<Member>& members) {
+    file_ << "struct " << std::string(name) << " {\n";
+    file_ << kIndent << "fidl_union_tag_t tag;\n";
+    file_ << kIndent << "union {\n";
+    for (const auto& member : members) {
+        file_ << kIndent << kIndent;
+        EmitMemberDecl(&file_, member);
+        file_ << ";\n";
+    }
+    file_ << kIndent << "};\n";
+    file_ << "};\n";
+}
+
+void CGenerator::GenerateTaggedXUnionDeclaration(StringView name,
+                                                 const std::vector<Member>& members) {
+    // XUnions are (intentionally) unimplemented for C bindings.
+}
+
 std::map<const flat::Decl*, CGenerator::NamedBits>
 CGenerator::NameBits(const std::vector<std::unique_ptr<flat::Bits>>& bits_infos) {
     std::map<const flat::Decl*, NamedBits> named_bits;
@@ -395,6 +435,31 @@ CGenerator::NameTables(const std::vector<std::unique_ptr<flat::Table>>& table_in
     return named_tables;
 }
 
+std::map<const flat::Decl*, CGenerator::NamedUnion>
+CGenerator::NameUnions(const std::vector<std::unique_ptr<flat::Union>>& union_infos) {
+    std::map<const flat::Decl*, NamedUnion> named_unions;
+    for (const auto& union_info : union_infos) {
+        std::string union_name = NameName(union_info->name, "_", "_");
+        named_unions.emplace(
+            union_info.get(),
+            NamedUnion{
+                std::move(union_name),
+                *union_info
+            });
+    }
+    return named_unions;
+}
+
+std::map<const flat::Decl*, CGenerator::NamedXUnion>
+CGenerator::NameXUnions(const std::vector<std::unique_ptr<flat::XUnion>>& xunion_infos) {
+    std::map<const flat::Decl*, NamedXUnion> named_xunions;
+    for (const auto& xunion_info : xunion_infos) {
+        std::string xunion_name = NameName(xunion_info->name, "_", "_");
+        named_xunions.emplace(xunion_info.get(), NamedXUnion{std::move(xunion_name), *xunion_info});
+    }
+    return named_xunions;
+}
+
 void CGenerator::ProduceBitsForwardDeclaration(const NamedBits& named_bits) {
     auto subtype = static_cast<const flat::PrimitiveType*>(named_bits.bits_info.subtype_ctor->type)->subtype;
     GenerateIntegerTypedef(subtype, named_bits.name);
@@ -429,6 +494,14 @@ void CGenerator::ProduceStructForwardDeclaration(const NamedStruct& named_struct
 
 void CGenerator::ProduceTableForwardDeclaration(const NamedTable& named_table) {
     GenerateStructTypedef(named_table.c_name);
+}
+
+void CGenerator::ProduceUnionForwardDeclaration(const NamedUnion& named_union) {
+    GenerateStructTypedef(named_union.name);
+}
+
+void CGenerator::ProduceXUnionForwardDeclaration(const NamedXUnion& named_xunion) {
+    GenerateStructTypedef(named_xunion.name);
 }
 
 void CGenerator::ProduceConstDeclaration(const NamedConst& named_const) {
@@ -469,6 +542,47 @@ void CGenerator::ProduceStructDeclaration(const NamedStruct& named_struct) {
     EmitBlank(&file_);
 }
 
+void CGenerator::ProduceUnionDeclaration(const NamedUnion& named_union) {
+    std::vector<CGenerator::Member> members =
+        GenerateMembers(library_, named_union.union_info.members);
+    GenerateTaggedUnionDeclaration(named_union.name, members);
+
+    uint32_t tag = 0u;
+    for (const auto& member : named_union.union_info.members) {
+        std::string tag_name = NameUnionTag(named_union.name, member);
+        std::ostringstream value;
+        value << tag;
+        GenerateIntegerDefine(
+            std::move(tag_name),
+            types::PrimitiveSubtype::kUint32,
+            value.str());
+        ++tag;
+    }
+
+    EmitBlank(&file_);
+}
+
+void CGenerator::ProduceXUnionDeclaration(const NamedXUnion& named_xunion) {
+    std::vector<CGenerator::Member> members =
+        GenerateMembers(library_, named_xunion.xunion_info.members);
+    GenerateTaggedXUnionDeclaration(named_xunion.name, members);
+
+    uint32_t tag = 0u;
+    for (const auto& member : named_xunion.xunion_info.members) {
+        std::string tag_name = NameXUnionTag(named_xunion.name, member);
+        std::ostringstream value;
+        value << tag;
+        GenerateIntegerDefine(
+            std::move(tag_name),
+            types::PrimitiveSubtype::kUint32,
+            value.str());
+        ++tag;
+    }
+
+    EmitBlank(&file_);
+}
+
+
 std::ostringstream CGenerator::ProduceHeader() {
     GeneratePrologues();
 
@@ -479,6 +593,10 @@ std::ostringstream CGenerator::ProduceHeader() {
     std::map<const flat::Decl*, NamedStruct> named_structs = NameStructs(library_->struct_declarations_);
     std::map<const flat::Decl*, NamedTable> named_tables = NameTables(
         library_->table_declarations_);
+    std::map<const flat::Decl*, NamedUnion> named_unions =
+        NameUnions(library_->union_declarations_);
+    std::map<const flat::Decl*, NamedXUnion> named_xunions =
+        NameXUnions(library_->xunion_declarations_);
 
     file_ << "\n// Forward declarations\n\n";
     for (const auto* decl : library_->declaration_order_) {
@@ -518,6 +636,20 @@ std::ostringstream CGenerator::ProduceHeader() {
             }
             break;
         }
+        case flat::Decl::Kind::kUnion: {
+            auto iter = named_unions.find(decl);
+            if (iter != named_unions.end()) {
+                ProduceUnionForwardDeclaration(iter->second);
+            }
+            break;
+        }
+        case flat::Decl::Kind::kXUnion: {
+            auto iter = named_xunions.find(decl);
+            if (iter != named_xunions.end()) {
+                ProduceXUnionForwardDeclaration(iter->second);
+            }
+            break;
+        }
         default:
             break;
         }
@@ -552,6 +684,20 @@ std::ostringstream CGenerator::ProduceHeader() {
             // Tables are entirely forward declared, and their body is defined only in
             // implementation files.
             break;
+            case flat::Decl::Kind::kUnion: {
+            auto iter = named_unions.find(decl);
+            if (iter != named_unions.end()) {
+                ProduceUnionDeclaration(iter->second);
+            }
+            break;
+        }
+        case flat::Decl::Kind::kXUnion: {
+            auto iter = named_xunions.find(decl);
+            if (iter != named_xunions.end()) {
+                ProduceXUnionDeclaration(iter->second);
+            }
+            break;
+        }
         default:
             break;
         }
