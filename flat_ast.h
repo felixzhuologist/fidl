@@ -437,7 +437,8 @@ struct Decl {
     std::unique_ptr<raw::AttributeList> attributes;
     const Name name;
 
-    bool HasAttribute(std::string_view name) const;
+    bool HasAttribute(StringView name) const;
+    StringView GetAttribute(std::string name) const;
 
     std::string GetName() const;
 

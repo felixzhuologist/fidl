@@ -341,6 +341,18 @@ std::string NameLibraryCHeader(const std::vector<StringView>& library_name) {
     return StringJoin(library_name, "/") + "/c/fidl.h";
 }
 
+std::string NameDiscoverable(const flat::Interface& interface) {
+    return NameName(interface.name, "_", "_");
+}
+
+std::string NameMethod(StringView interface_name, const flat::Interface::Method& method) {
+    return std::string(interface_name) + NameIdentifier(method.name);
+}
+
+std::string NameInterface(const flat::Interface& interface) {
+    return NameName(interface.name, ".", ".");
+}
+
 std::string NameOrdinal(StringView method_name) {
     std::string ordinal_name(method_name);
     ordinal_name += "Ordinal";

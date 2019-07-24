@@ -6,7 +6,33 @@ namespace fidl {
 
 namespace {
 
+class IOFlagsGuard {
+public:
+    explicit IOFlagsGuard(std::ostream* stream)
+        : stream_(stream), flags_(stream_->flags()) {}
+    ~IOFlagsGuard() {
+        stream_->setf(flags_);
+    }
+
+private:
+    std::ostream* stream_;
+    std::ios::fmtflags flags_;
+};
+
 constexpr const char* kIndent = "    ";
+
+CGenerator::Member MessageHeader() {
+    return {
+        flat::Type::Kind::kIdentifier,
+        flat::Decl::Kind::kStruct,
+        "fidl_message_header_t",
+        "hdr",
+        {}, // element type
+        {}, // array counts
+        types::Nullability::kNonnullable,
+        {}, // max num elements
+    };
+}
 
 CGenerator::Member EmptyStructMember() {
     return {
@@ -18,6 +44,13 @@ CGenerator::Member EmptyStructMember() {
         // <http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf>).
         .name = "_reserved",
     };
+}
+
+CGenerator::Transport ParseTransport(StringView view) {
+    if (view == "SocketControl") {
+        return CGenerator::Transport::SocketControl;
+    }
+    return CGenerator::Transport::Channel;
 }
 
 void EmitFileComment(std::ostream* file) {
@@ -42,6 +75,160 @@ void EmitEndExternC(std::ostream* file) {
 
 void EmitBlank(std::ostream* file) {
     *file << "\n";
+}
+
+void EmitMethodInParamDecl(std::ostream* file, const CGenerator::Member& member) {
+    switch (member.kind) {
+    case flat::Type::Kind::kArray:
+        *file << "const " << member.type << " " << member.name;
+        for (uint32_t array_count : member.array_counts) {
+            *file << "[" << array_count << "]";
+        }
+        break;
+    case flat::Type::Kind::kVector:
+        *file << "const " << member.element_type << "* " << member.name << "_data, "
+              << "size_t" << member.name << "_count";
+        break;
+    case flat::Type::Kind::kString:
+        *file << "const char* " << member.name << "_data, "
+              << "size_t" << member.name << "_size";
+        break;
+    case flat::Type::Kind::kHandle:
+    case flat::Type::Kind::kPrimitive:
+        *file << member.type << " " << member.name;
+        break;
+    case flat::Type::Kind::kIdentifier:
+        switch (member.decl_kind) {
+        case flat::Decl::Kind::kConst:
+            assert(false && "bad decl kind for member");
+            break;
+        case flat::Decl::Kind::kBits:
+        case flat::Decl::Kind::kEnum:
+        case flat::Decl::Kind::kInterface:
+            *file << member.type << " " << member.name;
+            break;
+        case flat::Decl::Kind::kStruct:
+        case flat::Decl::Kind::kTable:
+        case flat::Decl::Kind::kUnion:
+        case flat::Decl::Kind::kXUnion:
+            switch (member.nullability) {
+            case types::Nullability::kNullable:
+                *file << "const " << member.type << " " << member.name;
+                break;
+            case types::Nullability::kNonnullable:
+                *file << "const " << member.type << "* " << member.name;
+                break;
+            }
+            break;
+        }
+        break;
+    }
+}
+
+// prefixes the name with out_, except for vectors/strings, which instead of
+// having a data pointer + count, have a buffer pointer, _capacity, and out_count
+void EmitMethodOutParamDecl(std::ostream* file, const CGenerator::Member& member) {
+    switch (member.kind) {
+    case flat::Type::Kind::kArray:
+        *file << member.type << " out_" << member.name;
+        for (uint32_t array_count : member.array_counts) {
+            *file << "[" << array_count << "]";
+        }
+        break;
+    case flat::Type::Kind::kVector:
+        *file << member.element_type << "* " << member.name << "_buffer, "
+              << "size_t " << member.name << "_capacity, "
+              << "size_t* out_" << member.name << "_count";
+        break;
+    case flat::Type::Kind::kString:
+        *file << "char* " << member.name << "_buffer, "
+              << "size_t " << member.name << "_capacity, "
+              << "size_t* out_" << member.name << "_size";
+        break;
+    case flat::Type::Kind::kHandle:
+    case flat::Type::Kind::kPrimitive:
+        *file << member.type << "* out_" << member.name;
+        break;
+    case flat::Type::Kind::kIdentifier:
+        switch (member.decl_kind) {
+        case flat::Decl::Kind::kConst:
+            assert(false && "bad decl kind for member");
+            break;
+        case flat::Decl::Kind::kBits:
+        case flat::Decl::Kind::kEnum:
+        case flat::Decl::Kind::kInterface:
+            *file << member.type << "* out_" << member.name;
+            break;
+        case flat::Decl::Kind::kStruct:
+        case flat::Decl::Kind::kTable:
+        case flat::Decl::Kind::kUnion:
+        case flat::Decl::Kind::kXUnion:
+            switch (member.nullability) {
+            case types::Nullability::kNullable:
+                *file << member.type << " out_" << member.name;
+                break;
+            case types::Nullability::kNonnullable:
+                *file << member.type << "* out_" << member.name;
+                break;
+            }
+            break;
+        }
+        break;
+    }
+}
+
+void EmitClientMethodDecl(std::ostream* file,
+                          StringView method_name,
+                          const std::vector<CGenerator::Member>& request,
+                          const std::vector<CGenerator::Member>& response) {
+    *file << "zx_status_t " << std::string(method_name) << "(zx_handle_t _channel";
+    for (const auto& member : request) {
+        *file << ", ";
+        EmitMethodInParamDecl(file, member);
+    }
+    for (auto member : response) {
+        *file << ", ";
+        EmitMethodOutParamDecl(file, member);
+    }
+    *file << ")";
+}
+
+void EmitServerMethodDecl(std::ostream* file,
+                          StringView method_name,
+                          const std::vector<CGenerator::Member>& request,
+                          bool has_response) {
+    *file << "zx_status_t (*" << std::string(method_name) << ")(void* ctx";
+    for (const auto& member : request) {
+        *file << ", ";
+        EmitMethodInParamDecl(file, member);
+    }
+    if (has_response) {
+        *file << ", fidl_txn_t* txn";
+    }
+    *file << ")";
+}
+
+void EmitServerDispatchDecl(std::ostream* file, StringView interface_name) {
+    *file << "zx_status_t " << std::string(interface_name)
+          << "_dispatch(void* ctx, fidl_txn_t* txn, fidl_msg_t* msg, const "
+          << std::string(interface_name) << "_ops_t* ops)";
+}
+
+void EmitServerTryDispatchDecl(std::ostream* file, StringView interface_name) {
+    *file << "zx_status_t " << std::string(interface_name)
+          << "_try_dispatch(void* ctx, fidl_txn_t* txn, fidl_msg_t* msg, const "
+          << std::string(interface_name) << "_ops_t* ops)";
+}
+
+void EmitServerReplyDecl(std::ostream* file,
+                         StringView method_name,
+                         const std::vector<CGenerator::Member>& response) {
+    *file << "zx_status_t " << std::string(method_name) << "_reply(fidl_txn_t* _txn";
+    for (const auto& member : response) {
+        *file << ", ";
+        EmitMethodInParamDecl(file, member);
+    }
+    *file << ")";
 }
 
 void EmitMemberDecl(std::ostream* file, const CGenerator::Member& member) {
@@ -160,7 +347,7 @@ void ArrayCountsAndElementTypeName(
     const flat::Library* library,
     const flat::Type* type,
     std::vector<uint32_t>* out_array_counts,
-    std::string* out_element_type_name) 
+    std::string* out_element_type_name)
 {
     std::vector<uint32_t> array_counts;
     for (;;) {
@@ -256,6 +443,25 @@ GenerateMembers(const flat::Library* library,
     return members;
 }
 
+void GetMethodParameters(const flat::Library* library,
+                         const CGenerator::NamedMethod& method_info,
+                         std::vector<CGenerator::Member>* request,
+                         std::vector<CGenerator::Member>* response) {
+    if (request) {
+        request->reserve(method_info.request->parameters.size());
+        for (const auto& parameter : method_info.request->parameters) {
+            request->push_back(CreateMember(library, parameter));
+        }
+    }
+
+    if (response && method_info.response) {
+        response->reserve(method_info.response->parameters.size());
+        for (const auto& parameter : method_info.response->parameters) {
+            response->push_back(CreateMember(library, parameter));
+        }
+    }
+}
+
 } // namespace
 
 void CGenerator::GeneratePrologues() {
@@ -336,7 +542,7 @@ void CGenerator::GenerateStructTypedef(StringView name) {
 void CGenerator::GenerateStructDeclaration(StringView name, const std::vector<Member>& members, StructKind kind) {
     file_ << "struct " << std::string(name) << " {\n";
     if (kind == StructKind::kMessage) {
-        // ??
+        // ensure the message is FIDL aligned
         file_ << kIndent << "FIDL_ALIGNDECL\n";
     }
 
@@ -402,6 +608,63 @@ CGenerator::NameEnums(const std::vector<std::unique_ptr<flat::Enum>>& enum_infos
         named_enums.emplace(enum_info.get(), NamedEnum{std::move(enum_name), *enum_info});
     }
     return named_enums;
+}
+
+std::map<const flat::Decl*, CGenerator::NamedInterface>
+CGenerator::NameInterfaces(const std::vector<std::unique_ptr<flat::Interface>>& interface_infos) {
+    std::map<const flat::Decl*, NamedInterface> named_interfaces;
+    for (const auto& interface_info : interface_infos) {
+        NamedInterface named_interface;
+        named_interface.c_name = NameInterface(*interface_info);
+        if (interface_info->HasAttribute("Discoverable")) {
+            named_interface.discoverable_name = NameDiscoverable(*interface_info);
+        }
+        named_interface.transport = ParseTransport(interface_info->GetAttribute("Transport"));
+
+        for (const auto& method_pointer : interface_info->all_methods) {
+            assert(method_pointer != nullptr);
+            const auto& method = *method_pointer;
+            NamedMethod named_method;
+            std::string method_name = NameMethod(named_interface.c_name, method);
+            named_method.ordinal = method.ordinal->value;
+            named_method.ordinal_name = NameOrdinal(method_name);
+            named_method.generated_ordinal = method.generated_ordinal->value;
+            named_method.generated_ordinal_name = NameGenOrdinal(method_name);
+            named_method.identifier = NameIdentifier(method.name);
+            named_method.c_name = method_name;
+            if (method.maybe_request != nullptr) {
+                std::string c_name = NameMessage(method_name, types::MessageKind::kRequest);
+                std::string coded_name = NameTable(c_name);
+                named_method.request = std::make_unique<NamedMessage>(
+                    NamedMessage{
+                        std::move(c_name),
+                        std::move(coded_name),
+                        method.maybe_request->members,
+                        method.maybe_request->typeshape,
+                    });
+            }
+            if (method.maybe_response != nullptr) {
+                std::string c_name = NameMessage(
+                    method_name,
+                    method.maybe_request == nullptr
+                        ? types::MessageKind::kEvent
+                        : types::MessageKind::kResponse);
+                std::string coded_name = NameTable(c_name);
+                named_method.response = std::make_unique<NamedMessage>(
+                    NamedMessage{
+                        std::move(c_name),
+                        std::move(coded_name),
+                        method.maybe_response->members,
+                        method.maybe_response->typeshape,
+                    });
+            }
+            named_interface.methods.push_back(std::move(named_method));
+        }
+        named_interfaces.emplace(
+            interface_info.get(),
+            std::move(named_interface));
+    }
+    return named_interfaces;
 }
 
 std::map<const flat::Decl*, CGenerator::NamedStruct>
@@ -488,6 +751,25 @@ void CGenerator::ProduceEnumForwardDeclaration(const NamedEnum& named_enum) {
     EmitBlank(&file_);
 }
 
+void CGenerator::ProduceInterfaceForwardDeclaration(const NamedInterface& named_interface) {
+    if (!named_interface.discoverable_name.empty()) {
+        file_ << "#define " << named_interface.c_name << "_Name \"" << named_interface.discoverable_name << "\"\n";
+    }
+    for (const auto& method_info : named_interface.methods) {
+        {
+            IOFlagsGuard reset_flags(&file_);
+            file_ << "#define " << method_info.ordinal_name << " ((uint32_t)0x"
+                  << std::uppercase << std::hex << method_info.ordinal << std::dec << ")\n";
+            file_ << "#define " << method_info.generated_ordinal_name << " ((uint32_t)0x"
+                  << std::uppercase << std::hex << method_info.generated_ordinal << std::dec << ")\n";
+        }
+        if (method_info.request)
+            GenerateStructTypedef(method_info.request->c_name);
+        if (method_info.response)
+            GenerateStructTypedef(method_info.response->c_name);
+    }
+}
+
 void CGenerator::ProduceStructForwardDeclaration(const NamedStruct& named_struct) {
     GenerateStructTypedef(named_struct.c_name);
 }
@@ -502,6 +784,15 @@ void CGenerator::ProduceUnionForwardDeclaration(const NamedUnion& named_union) {
 
 void CGenerator::ProduceXUnionForwardDeclaration(const NamedXUnion& named_xunion) {
     GenerateStructTypedef(named_xunion.name);
+}
+
+void CGenerator::ProduceInterfaceExternDeclaration(const NamedInterface& named_interface) {
+    for (const auto& method_info : named_interface.methods) {
+        if (method_info.request)
+            file_ << "extern const fidl_type_t " << method_info.request->coded_name << ";\n";
+        if (method_info.response)
+            file_ << "extern const fidl_type_t " << method_info.response->coded_name << ";\n";
+    }
 }
 
 void CGenerator::ProduceConstDeclaration(const NamedConst& named_const) {
@@ -528,6 +819,28 @@ void CGenerator::ProduceConstDeclaration(const NamedConst& named_const) {
     }
 
     EmitBlank(&file_);
+}
+
+void CGenerator::ProduceMessageDeclaration(const NamedMessage& named_message) {
+    std::vector<CGenerator::Member> members;
+    members.reserve(1 + named_message.parameters.size());
+    members.push_back(MessageHeader());
+    for (const auto& parameter : named_message.parameters) {
+        members.push_back(CreateMember(library_, parameter));
+    }
+
+    GenerateStructDeclaration(named_message.c_name, members, StructKind::kMessage);
+
+    EmitBlank(&file_);
+}
+
+void CGenerator::ProduceInterfaceDeclaration(const NamedInterface& named_interface) {
+    for (const auto& method_info : named_interface.methods) {
+        if (method_info.request)
+            ProduceMessageDeclaration(*method_info.request);
+        if (method_info.response)
+            ProduceMessageDeclaration(*method_info.response);
+    }
 }
 
 void CGenerator::ProduceStructDeclaration(const NamedStruct& named_struct) {
@@ -582,6 +895,52 @@ void CGenerator::ProduceXUnionDeclaration(const NamedXUnion& named_xunion) {
     EmitBlank(&file_);
 }
 
+void CGenerator::ProduceInterfaceClientDeclaration(const NamedInterface& named_interface) {
+    for (const auto& method_info : named_interface.methods) {
+        if (!method_info.request)
+            continue;
+        std::vector<Member> request;
+        std::vector<Member> response;
+        GetMethodParameters(library_, method_info, &request, &response);
+        EmitClientMethodDecl(&file_, method_info.c_name, request, response);
+        file_ << ";\n";
+    }
+
+    EmitBlank(&file_);
+}
+
+void CGenerator::ProduceInterfaceServerDeclaration(const NamedInterface& named_interface) {
+    file_ << "typedef struct " << named_interface.c_name << "_ops {\n";
+    for (const auto& method_info : named_interface.methods) {
+        if (!method_info.request)
+            continue;
+        std::vector<Member> request;
+        GetMethodParameters(library_, method_info, &request, nullptr);
+        bool has_response = method_info.response != nullptr;
+
+        file_ << kIndent;
+        EmitServerMethodDecl(&file_, method_info.identifier, request, has_response);
+        file_ << ";\n";
+    }
+    file_ << "} " << named_interface.c_name << "_ops_t;\n\n";
+
+    EmitServerDispatchDecl(&file_, named_interface.c_name);
+    file_ << ";\n";
+    EmitServerTryDispatchDecl(&file_, named_interface.c_name);
+    file_ << ";\n\n";
+
+    for (const auto& method_info : named_interface.methods) {
+        if (!method_info.request || !method_info.response)
+            continue;
+        std::vector<Member> response;
+        GetMethodParameters(library_, method_info, nullptr, &response);
+        EmitServerReplyDecl(&file_, method_info.c_name, response);
+        file_ << ";\n";
+    }
+
+    EmitBlank(&file_);
+}
+
 
 std::ostringstream CGenerator::ProduceHeader() {
     GeneratePrologues();
@@ -590,6 +949,8 @@ std::ostringstream CGenerator::ProduceHeader() {
     std::map<const flat::Decl*, NamedConst> named_consts =
         NameConsts(library_->const_declarations_);
     std::map<const flat::Decl*, NamedEnum> named_enums = NameEnums(library_->enum_declarations_);
+    std::map<const flat::Decl*, NamedInterface> named_interfaces =
+        NameInterfaces(library_->interface_declarations_);
     std::map<const flat::Decl*, NamedStruct> named_structs = NameStructs(library_->struct_declarations_);
     std::map<const flat::Decl*, NamedTable> named_tables = NameTables(
         library_->table_declarations_);
@@ -620,6 +981,13 @@ std::ostringstream CGenerator::ProduceHeader() {
             auto iter = named_enums.find(decl);
             if (iter != named_enums.end()) {
                 ProduceEnumForwardDeclaration(iter->second);
+            }
+            break;
+        }
+        case flat::Decl::Kind::kInterface: {
+            auto iter = named_interfaces.find(decl);
+            if (iter != named_interfaces.end()) {
+                ProduceInterfaceForwardDeclaration(iter->second);
             }
             break;
         }
@@ -655,6 +1023,31 @@ std::ostringstream CGenerator::ProduceHeader() {
         }
     }
 
+
+    file_ << "\n// Extern declarations\n\n";
+    for (const auto* decl : library_->declaration_order_) {
+        switch (decl->kind) {
+        case flat::Decl::Kind::kBits:
+        case flat::Decl::Kind::kConst:
+        case flat::Decl::Kind::kEnum:
+        case flat::Decl::Kind::kStruct:
+        case flat::Decl::Kind::kTable:
+        case flat::Decl::Kind::kUnion:
+        case flat::Decl::Kind::kXUnion:
+            // Only messages have extern fidl_type_t declarations.
+            break;
+        case flat::Decl::Kind::kInterface: {
+            auto iter = named_interfaces.find(decl);
+            if (iter != named_interfaces.end()) {
+                ProduceInterfaceExternDeclaration(iter->second);
+            }
+            break;
+        }
+        default:
+            abort();
+        }
+    }
+
     file_ << "\n// Declarations\n\n";
     for (const auto* decl : library_->declaration_order_) {
         switch (decl->kind) {
@@ -673,6 +1066,13 @@ std::ostringstream CGenerator::ProduceHeader() {
             // Enums can be entirely forward declared, as they have no
             // dependencies other than standard headers.
             break;
+        case flat::Decl::Kind::kInterface: {
+            auto iter = named_interfaces.find(decl);
+            if (iter != named_interfaces.end()) {
+                ProduceInterfaceDeclaration(iter->second);
+            }
+            break;
+        }
         case flat::Decl::Kind::kStruct: {
             auto iter = named_structs.find(decl);
             if (iter != named_structs.end()) {
@@ -700,6 +1100,33 @@ std::ostringstream CGenerator::ProduceHeader() {
         }
         default:
             break;
+        }
+    }
+
+    file_ << "\n// Simple bindings \n\n";
+    for (const auto* decl : library_->declaration_order_) {
+        switch (decl->kind) {
+        case flat::Decl::Kind::kBits:
+        case flat::Decl::Kind::kConst:
+        case flat::Decl::Kind::kEnum:
+        case flat::Decl::Kind::kStruct:
+        case flat::Decl::Kind::kTable:
+        case flat::Decl::Kind::kUnion:
+        case flat::Decl::Kind::kXUnion:
+            // Only interfaces have client declarations.
+            break;
+        case flat::Decl::Kind::kInterface: {
+            if (!HasSimpleLayout(decl))
+                break;
+            auto iter = named_interfaces.find(decl);
+            if (iter != named_interfaces.end()) {
+                ProduceInterfaceClientDeclaration(iter->second);
+                ProduceInterfaceServerDeclaration(iter->second);
+            }
+            break;
+        }
+        default:
+            abort();
         }
     }
 

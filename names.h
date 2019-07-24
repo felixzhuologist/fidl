@@ -33,6 +33,11 @@ std::string NameFlatConstant(const flat::Constant* constant);
 std::string NameFlatTypeConstructor(const flat::TypeConstructor* type_ctor);
 std::string NameFlatType(const flat::Type* type);
 std::string NameFlatCType(const flat::Type* type, flat::Decl::Kind decl_kind);
+std::string NameInterface(const flat::Interface& interface);
+std::string NameDiscoverable(const flat::Interface& interface);
+std::string NameMethod(StringView interface_name, const flat::Interface::Method& method);
+std::string NameOrdinal(StringView method_name);
+std::string NameGenOrdinal(StringView method_name);
 std::string NameMessage(StringView method_name, types::MessageKind kind);
 
 std::string NameTable(StringView type_name);

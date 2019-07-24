@@ -263,10 +263,25 @@ TypeShape PrimitiveType::Shape(types::PrimitiveSubtype subtype) {
     return TypeShape(SubtypeSize(subtype), SubtypeSize(subtype));
 }
 
-bool Decl::HasAttribute(std::string_view name) const {
+bool Decl::HasAttribute(StringView name) const {
     if (!attributes)
         return false;
     return attributes->HasAttribute(std::string(name));
+}
+
+StringView Decl::GetAttribute(std::string name) const {
+    if (!attributes)
+        return StringView();
+    for (const auto& attribute : attributes->attributes) {
+        if (attribute->name == name) {
+            if (attribute->value != "") {
+                const auto& value = attribute->value;
+                return StringView(value.data(), value.size());
+            }
+        }
+        break;
+    }
+    return StringView();
 }
 
 std::string Decl::GetName() const {
@@ -2503,6 +2518,10 @@ bool Library::CompileEnum(Enum* enum_declaration) {
     }
 
     return true;
+}
+
+bool HasSimpleLayout(const Decl* decl) {
+    return decl->GetAttribute("Layout") == "Simple";
 }
 
 bool Library::CompileInterface(Interface* interface_declaration) {
