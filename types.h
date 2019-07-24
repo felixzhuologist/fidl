@@ -1,6 +1,8 @@
 #ifndef TYPES_H_
 #define TYPES_H_
 
+#define ZX_CHANNEL_MAX_MSG_HANDLES          ((uint32_t)64u)
+
 namespace fidl {
 namespace types {
 

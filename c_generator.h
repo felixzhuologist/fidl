@@ -18,6 +18,7 @@ public:
     ~CGenerator() = default;
 
     std::ostringstream ProduceHeader();
+    std::ostringstream ProduceClient();
 
     enum class Transport {
         Channel,
@@ -110,6 +111,8 @@ private:
         kNonmessage,
     };
 
+    uint32_t GetMaxHandlesFor(Transport transport, const TypeShape& typeshape);
+
     void GeneratePrologues();
     void GenerateEpilogues();
 
@@ -159,6 +162,7 @@ private:
     void ProduceXUnionDeclaration(const NamedXUnion& named_xunion);
 
     void ProduceInterfaceClientDeclaration(const NamedInterface& named_interface);
+    void ProduceInterfaceClientImplementation(const NamedInterface& named_interface);
 
     void ProduceInterfaceServerDeclaration(const NamedInterface& named_interface);
 

@@ -4,6 +4,7 @@ test.fidl
 test2.fidl
 out.json
 out.h
+client.c
 
 bazel-bin
 bazel-fidl

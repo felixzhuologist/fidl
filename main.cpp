@@ -57,6 +57,7 @@ void Usage() {
 
 enum class Behavior {
     kCHeader,
+    kCClient,
     kJSON,
 };
 
@@ -191,6 +192,11 @@ int compile(fidl::ErrorReporter* error_reporter,
         Write(generator.ProduceHeader(), std::move(output_file));
         break;
     }
+    case Behavior::kCClient: {
+        fidl::CGenerator generator(final_library);
+        Write(generator.ProduceClient(), std::move(output_file));
+        break;
+    }
     case Behavior::kJSON: {
       fidl::JSONGenerator generator(final_library);
       Write(generator.Produce(), std::move(output_file));
@@ -225,7 +231,9 @@ int main(int argc, char* argv[]) {
             warnings_as_errors = true;
         } else if (flag == "--c-header") {
             outputs.emplace(Behavior::kCHeader, Open(argv_args->Claim(), std::ios::out));
-        } else if (flag == "--json") {
+        } else if (flag == "--c-client") {
+            outputs.emplace(Behavior::kCClient, Open(argv_args->Claim(), std::ios::out));
+        }else if (flag == "--json") {
             outputs.emplace(Behavior::kJSON, Open(argv_args->Claim(), std::ios::out));
         } else if (flag == "--name") {
             library_name = argv_args->Claim();
