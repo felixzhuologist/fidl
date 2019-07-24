@@ -19,6 +19,7 @@ public:
 
     std::ostringstream ProduceHeader();
     std::ostringstream ProduceClient();
+    std::ostringstream ProduceServer();
 
     enum class Transport {
         Channel,
@@ -165,6 +166,7 @@ private:
     void ProduceInterfaceClientImplementation(const NamedInterface& named_interface);
 
     void ProduceInterfaceServerDeclaration(const NamedInterface& named_interface);
+    void ProduceInterfaceServerImplementation(const NamedInterface& named_interface);
 
     const flat::Library* library_;
     std::ostringstream file_;
